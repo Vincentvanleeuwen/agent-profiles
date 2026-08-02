@@ -118,3 +118,76 @@ _cp_build() {
     done
     _cp_rewrite "$_dest/settings.json" "$_dest" "$_src"
 }
+
+_cp_dir()    { printf '%s' "$(_cp_store)/profiles/$1"; }
+_cp_exists() { [ -d "$(_cp_dir "$1")" ]; }
+_cp_valid_name() {
+    case "$1" in
+        ""|.|..|*/*|-*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+_cp_cmd_create() {
+    _n="$1"
+    _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
+    if _cp_exists "$_n"; then
+        printf 'claude-profile: profile "%s" already exists\n' "$_n" >&2
+        return 1
+    fi
+    _from=$(_cp_resolve) || return 1
+    mkdir -p "$(_cp_store)/profiles"
+    _cp_build "$_from" "$(_cp_dir "$_n")"
+    printf 'created %s <- %s\n' "$_n" "$_from"
+}
+
+_cp_cmd_set() {
+    _n="$1"
+    if ! _cp_exists "$_n"; then
+        printf 'claude-profile: no such profile "%s"\n' "$_n" >&2
+        return 1
+    fi
+    printf '%s\n' "$_n" > "$(_cp_store)/active"
+    printf 'active profile: %s\n' "$_n"
+}
+
+_cp_cmd_default() {
+    rm -f "$(_cp_store)/active"
+    printf 'active profile: none (using ~/.claude)\n'
+}
+
+_cp_cmd_status() {
+    _sel=$(_cp_selected)
+    if [ -z "$_sel" ]; then
+        printf 'active: none (using ~/.claude)\n'
+    else
+        printf 'active: %s  (%s)\n' "$_sel" "$_CP_SRC"
+    fi
+    printf 'profiles:\n'
+    if [ -d "$(_cp_store)/profiles" ]; then
+        for _p in "$(_cp_store)"/profiles/*; do
+            [ -d "$_p" ] || continue
+            printf '  %s\n' "${_p##*/}"
+        done
+    fi
+}
+
+_cp_main() {
+    case "${1:-}" in
+        "")                 _cp_cmd_status ;;
+        default|--reset)    _cp_cmd_default ;;
+        --create)           shift; _cp_cmd_create "$@" ;;
+        -h|--help)          _cp_cmd_status ;;
+        -*)                 printf 'claude-profile: unknown option %s\n' "$1" >&2; return 1 ;;
+        *)                  _cp_cmd_set "$1" ;;
+    esac
+}
+
+claude() {
+    if [ "${1:-}" = profile ]; then
+        shift
+        _cp_main "$@"
+        return $?
+    fi
+    CLAUDE_CONFIG_DIR="$(_cp_resolve)" command claude "$@"
+}

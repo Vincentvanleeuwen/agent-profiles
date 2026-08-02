@@ -118,5 +118,43 @@ _cp_rewrite "$OTHER" "$TMP/store/profiles/unrelated"
 check "_cp_rewrite ignores stale global _src" \
    'grep -q "$TMP/store/profiles/built/leftover" "$OTHER"'
 
+echo "== Task 3: create and activate =="
+
+rm -rf "$TMP/store/profiles" "$TMP/store/active"
+mkdir -p "$TMP/store/profiles"
+
+_cp_main --create dev >/dev/null
+check "create makes profile dir"  '[ -d "$TMP/store/profiles/dev" ]'
+check "create built settings"     '[ -f "$TMP/store/profiles/dev/settings.json" ]'
+check "create is not active yet"  '[ ! -f "$TMP/store/active" ]'
+
+_cp_main --create dev >/dev/null 2>&1
+eq "create refuses duplicate" "$?" "1"
+
+_cp_main dev >/dev/null
+eq "set writes active"   "$(cat "$TMP/store/active")" "dev"
+eq "resolve follows it"  "$(_cp_resolve)" "$TMP/store/profiles/dev"
+
+# Creating while a profile is active forks from that profile.
+printf 'dev only\n' > "$TMP/store/profiles/dev/MARKER.md"
+_cp_main --create fin >/dev/null
+check "create forks from active" '[ -f "$TMP/store/profiles/fin/MARKER.md" ]'
+
+_cp_main default >/dev/null
+check "default clears active" '[ ! -f "$TMP/store/active" ]'
+eq    "default falls back"    "$(_cp_resolve)" "$FAKEHOME/.claude"
+
+_cp_main --reset >/dev/null
+check "--reset is an alias for default" '[ ! -f "$TMP/store/active" ]'
+
+_cp_main unknown-name >/dev/null 2>&1
+eq "set refuses unknown profile" "$?" "1"
+check "refused set left active alone" '[ ! -f "$TMP/store/active" ]'
+
+check "status lists profiles" '_cp_main | grep -q dev'
+_cp_main dev >/dev/null
+check "status names active"   '_cp_main | grep -q "active: dev"'
+check "status names source"   '_cp_main | grep -q "active"'
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
