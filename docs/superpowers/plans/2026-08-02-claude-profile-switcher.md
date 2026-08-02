@@ -886,6 +886,96 @@ git commit -m "fix: propagate failures out of profile build and rewrite"
 
 ---
 
+### Task 5c: Stop `_cp_backup` from nesting on a same-second collision
+
+Added after Task 9 review. The plan originally accepted same-second timestamp
+collisions in `_cp_backup` as a known limitation. That was written assuming a
+collision would overwrite or error. It does neither: `mv` into an existing
+directory *nests* inside it.
+
+Reproduced: `--update dev` then `--delete dev` within the same second both
+resolve to `.backups/dev-<TS>`. The first moves the profile there. The second
+lands at `.backups/dev-<TS>/dev/`. Both return 0 and both print the same path.
+Anyone restoring from the reported path gets the first generation; the second is
+buried a directory deeper with nothing pointing at it.
+
+The identical fix already shipped in `_cp_backup_statusline` (Task 9): search for
+a free name instead of trusting the timestamp.
+
+**Files:**
+- Modify: `claude-profile.sh` (`_cp_backup`)
+- Modify: `test.sh`
+
+**Interfaces:**
+- Consumes: `_cp_store`, `_cp_dir`.
+- Produces: no signature change. `_cp_backup` never writes into an existing path.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `test.sh` before the summary block:
+
+```sh
+echo "== Task 5c: backup collision =="
+
+_cp_main --create colla >/dev/null
+printf 'gen1\n' > "$TMP/store/profiles/colla/GEN.md"
+
+# Force both backups into the same timestamp.
+date() { printf '20260101-000000\n'; }
+
+bk1=$(_cp_backup colla)
+_cp_main --create colla >/dev/null
+printf 'gen2\n' > "$TMP/store/profiles/colla/GEN.md"
+bk2=$(_cp_backup colla)
+
+unset -f date
+
+check "collision produced two distinct paths" '[ "$bk1" != "$bk2" ]'
+check "first backup holds gen1"  'grep -q gen1 "$bk1/GEN.md"'
+check "second backup holds gen2" 'grep -q gen2 "$bk2/GEN.md"'
+check "no nesting inside first backup" '[ ! -d "$bk1/colla" ]'
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `sh test.sh`
+Expected: FAIL on `collision produced two distinct paths` and `no nesting inside first backup`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+```sh
+_cp_backup() {
+    _n="$1"
+    _stamp=$(date +%Y%m%d-%H%M%S)
+    mkdir -p "$(_cp_store)/.backups" || return 1
+    # Never write into an existing path: mv into an existing directory nests
+    # inside it rather than failing, which would leave two generations stacked
+    # with only the first reachable at the reported path.
+    _dst="$(_cp_store)/.backups/$_n-$_stamp"
+    _i=1
+    while [ -e "$_dst" ]; do
+        _dst="$(_cp_store)/.backups/$_n-$_stamp-$_i"
+        _i=$((_i + 1))
+    done
+    mv "$(_cp_dir "$_n")" "$_dst" || return 1
+    printf '%s' "$_dst"
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `sh test.sh` then `bash test.sh`
+Expected: both print `all passed`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add claude-profile.sh test.sh
+git commit -m "fix: never nest a profile backup on a same-second collision"
+```
+
+---
+
 ### Task 6: `--delete`, `--rename`, `--copy`
 
 **Files:**
