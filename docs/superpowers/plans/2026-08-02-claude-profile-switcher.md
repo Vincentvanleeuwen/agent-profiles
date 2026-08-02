@@ -674,12 +674,16 @@ Expected: FAIL — `update restored file from source`, and `_cp_main: unknown op
 Append to `claude-profile.sh`:
 
 ```sh
+# Returns non-zero if the backup could not be made. Callers MUST abort on
+# failure: the backup is this tool's only rollback, so reporting success for a
+# backup that does not exist, right before overwriting the profile it was meant
+# to protect, is the worst failure the tool has.
 _cp_backup() {
     _n="$1"
     _stamp=$(date +%Y%m%d-%H%M%S)
     _dst="$(_cp_store)/.backups/$_n-$_stamp"
-    mkdir -p "$(_cp_store)/.backups"
-    mv "$(_cp_dir "$_n")" "$_dst"
+    mkdir -p "$(_cp_store)/.backups" || return 1
+    mv "$(_cp_dir "$_n")" "$_dst" || return 1
     printf '%s' "$_dst"
 }
 
@@ -694,7 +698,10 @@ _cp_cmd_update() {
         printf 'claude-profile: "%s" is the active source; switch away first\n' "$_n" >&2
         return 1
     fi
-    _bk=$(_cp_backup "$_n")
+    if ! _bk=$(_cp_backup "$_n"); then
+        printf 'claude-profile: backup failed, not updating "%s"\n' "$_n" >&2
+        return 1
+    fi
     _cp_build "$_from" "$(_cp_dir "$_n")"
     printf 'backed up -> %s\n' "$_bk"
     printf 'updated %s <- %s\n' "$_n" "$_from"
@@ -798,7 +805,10 @@ _cp_cmd_delete() {
             return 1
         fi
     fi
-    _bk=$(_cp_backup "$_n")
+    if ! _bk=$(_cp_backup "$_n"); then
+        printf 'claude-profile: backup failed, not deleting "%s"\n' "$_n" >&2
+        return 1
+    fi
     printf 'deleted %s (kept at %s)\n' "$_n" "$_bk"
 }
 
