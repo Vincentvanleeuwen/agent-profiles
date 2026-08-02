@@ -186,6 +186,11 @@ _cp_main --create "" >/dev/null 2>&1
 eq "create rejects empty name" "$?" "1"
 eq "empty name made no dir" "$(find "$TMP/store/profiles" -maxdepth 1 -type d | wc -l)" "$before"
 
+_cp_main --create "my profile" >/dev/null 2>&1
+eq "create rejects name with space" "$?" "1"
+check "space name made no dir" '[ ! -e "$TMP/store/profiles/my profile" ]'
+eq "space name made no other dir either" "$(find "$TMP/store/profiles" -maxdepth 1 -type d | wc -l)" "$before"
+
 # Write guards on an unwritable store. chmod cannot deny root, so the
 # assertion would pass for the wrong reason under a root-run CI — skip
 # explicitly rather than assert something chmod never enforced.
@@ -525,6 +530,90 @@ check "shared list still symlinked" '[ -L "$TMP/store/profiles/symp/plugins" ]'
 check "show lists symlinked skill" '_cp_main --show symp | grep -q relskill'
 _CP_YES=1 _cp_main --delete symp >/dev/null
 rm -rf "$FAKEHOME/.claude/skills/relskill" "$TMP/external"
+
+echo "== Task 12: C1 empty-name guard on _cp_exists =="
+
+# _cp_exists "" used to be true (_cp_dir "" is "<store>/profiles/", always a
+# directory), so an omitted argument passed every gate it guards. Confirm all
+# five gated commands now refuse it, and touch nothing on the way out.
+_before_profiles=$(find "$TMP/store/profiles" -maxdepth 1 -type d | wc -l)
+_before_backups=$(find "$TMP/store/.backups" -maxdepth 1 -type d 2>/dev/null | wc -l)
+
+_cp_main --delete >/dev/null 2>&1
+eq "delete with no name is rejected" "$?" "1"
+eq "delete with no name moved no profile" \
+   "$(find "$TMP/store/profiles" -maxdepth 1 -type d | wc -l)" "$_before_profiles"
+eq "delete with no name created no backup" \
+   "$(find "$TMP/store/.backups" -maxdepth 1 -type d 2>/dev/null | wc -l)" "$_before_backups"
+
+_cp_main --update >/dev/null 2>&1
+eq "update with no name is rejected" "$?" "1"
+eq "update with no name changed no profile" \
+   "$(find "$TMP/store/profiles" -maxdepth 1 -type d | wc -l)" "$_before_profiles"
+eq "update with no name created no backup" \
+   "$(find "$TMP/store/.backups" -maxdepth 1 -type d 2>/dev/null | wc -l)" "$_before_backups"
+
+# Explicit target path: the real leak the reviewer reproduced was --export
+# with no name silently tarring up every profile, including a real
+# .credentials.json. An explicit path keeps this assertion off the cwd.
+_cp_main --export "" "$TMP/leak-attempt.tar.gz" >/dev/null 2>&1
+eq "export with no name is rejected" "$?" "1"
+check "export with no name wrote no archive" '[ ! -e "$TMP/leak-attempt.tar.gz" ]'
+
+_cp_main --show >/dev/null 2>&1
+eq "show with no name is rejected" "$?" "1"
+
+_cp_main --diff >/dev/null 2>&1
+eq "diff with no name is rejected" "$?" "1"
+_cp_main --diff dev >/dev/null 2>&1
+eq "diff with only one name is rejected" "$?" "1"
+
+echo "== Task 13: M4 shared-entry repair =="
+
+# A shared entry absent from the immediate source (never linked there, e.g. a
+# profile forked before first login) must still be linked from base — not
+# only from whatever the build's source happened to already have.
+mkdir -p "$TMP/store/profiles/stripped"
+cp -R "$TMP/store/profiles/dev/." "$TMP/store/profiles/stripped/"
+rm -f "$TMP/store/profiles/stripped/.credentials.json"
+check "stripped source has no credentials entry" \
+   '[ ! -e "$TMP/store/profiles/stripped/.credentials.json" ]'
+_cp_build "$TMP/store/profiles/stripped" "$TMP/store/profiles/repaired"
+check "M4: entry missing from source is still linked from base" \
+   '[ -L "$TMP/store/profiles/repaired/.credentials.json" ]'
+eq "M4: repaired link targets base, not source" \
+   "$(readlink "$TMP/store/profiles/repaired/.credentials.json")" "$FAKEHOME/.claude/.credentials.json"
+rm -rf "$TMP/store/profiles/stripped" "$TMP/store/profiles/repaired"
+
+echo "== Task 14: H2 zsh NOMATCH glob guard =="
+
+# A source directory with zero dot-entries must not abort _cp_build under
+# zsh's default NOMATCH (an unmatched glob aborts the whole command) — the
+# realistic "day one, fresh ~/.claude, nothing hidden yet" case.
+FRESH="$TMP/freshbase"
+mkdir -p "$FRESH"
+printf '{}\n' > "$FRESH/settings.json"
+_cp_build "$FRESH" "$TMP/h2build" >/dev/null 2>&1
+eq "build from base with no dot-entries succeeds" "$?" "0"
+check "build from base with no dot-entries produced settings.json" \
+   '[ -f "$TMP/h2build/settings.json" ]'
+rm -rf "$FRESH" "$TMP/h2build"
+
+# A store with zero profiles must not abort `claude profile` status either.
+mkdir -p "$TMP/h2store/profiles"
+out=$(CLAUDE_PROFILES_DIR="$TMP/h2store" _cp_main 2>&1)
+eq "status with zero profiles succeeds" "$?" "0"
+check "status with zero profiles still prints the header" \
+   'printf "%s" "$out" | grep -q "^profiles:$"'
+rm -rf "$TMP/h2store"
+
+# _cp_owned on a directory with zero dot-entries, the third affected glob.
+mkdir -p "$TMP/h2owned"
+printf '{}\n' > "$TMP/h2owned/settings.json"
+out=$(_cp_owned "$TMP/h2owned" 2>&1)
+eq "_cp_owned on dir with no dot-entries succeeds" "$?" "0"
+check "_cp_owned still lists the real entry" 'printf "%s" "$out" | grep -q settings.json'
+rm -rf "$TMP/h2owned"
 
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

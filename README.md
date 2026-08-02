@@ -40,7 +40,7 @@ plain `~/.claude`.
 | `claude profile --copy <a> <b>` | Duplicate |
 | `claude profile --show <name>` | Model, plugins, skills, hooks, MCP servers |
 | `claude profile --diff <a> <b>` | The same, side by side |
-| `claude profile --export <name> [file]` | Shareable tarball, never includes credentials |
+| `claude profile --export <name> [file]` | Shareable tarball, excludes `.credentials.json` (see Security notes) |
 | `claude profile --import <file> [name]` | Create a profile from a tarball |
 | `claude profile --install-statusline` | Show the active profile in your statusline |
 | `claude profile --uninstall-statusline` | Remove it |
@@ -91,11 +91,19 @@ structurally excludes `.credentials.json`, but `settings.json` is included,
 and anything you've put in its `env` block or baked into a hook command
 travels with the archive. The tool warns when it sees a top-level `env` key
 and prints the manifest of what's inside — read that manifest before you send
-the file to anyone.
+the file to anyone. **The warning itself needs `python3`**: without it the
+check silently fails and no warning is printed, so on a machine without
+`python3` you must read the manifest yourself instead of trusting the absence
+of a warning.
 
 **Import's path-traversal safety relies on the `tar` binary refusing to
 extract `../` entries**, which is true of bsdtar and modern GNU tar. It has
 not been verified against older GNU tar builds.
+
+**Import rewrites any `/profiles/` path segment it finds in `settings.json`**,
+not just the exporter's own store path — if a hook or `env` value legitimately
+points somewhere containing a literal `/profiles/` directory unrelated to
+claude-profile, that path gets rewritten too.
 
 ## Recovering from a bad `--update` or `--delete`
 
@@ -115,6 +123,14 @@ cp -R <store>/.backups/<name>-<timestamp> <store>/profiles/<name>
 `<store>` is `~/claude-profiles` by default, or `$CLAUDE_PROFILES_DIR` if you set it —
 which is exactly why the status output names it rather than making you guess.
 
+## Statusline
+
+`--install-statusline` edits `~/.claude/statusline.sh` (base), not any
+existing profile. Profiles created *after* installing inherit the block
+through the normal copy; profiles that already existed at install time don't
+get it until you `--update` them — `--update` mirrors from base, so it picks
+up the block same as any other change.
+
 ## Uninstall
 
 Remove the `source` line from your shell rc, run
@@ -124,14 +140,16 @@ except for the opt-in statusline block.
 
 ## Requirements
 
-POSIX sh (zsh or bash) and `tar`. `python3` is needed only for `--show` and
-`--diff` — without it, everything else works fine, but those two commands
-print the profile name and then a bare `command not found` (exit 127).
+POSIX sh (zsh or bash) and `tar`. `python3` is used by `--show`, `--diff`, and
+the `--export` env-block warning. Without it, `--show`/`--diff` print the
+profile name and then a bare `command not found` (exit 127); `--export` just
+skips the warning silently and still produces the archive — see Security
+notes.
 
 ## Tests
 
 ```sh
-sh test.sh && bash test.sh
+zsh test.sh && bash test.sh && sh test.sh
 ```
 
 Tests run against a temporary store and a temporary fake home. They never read

@@ -113,33 +113,40 @@ _cp_rewrite() {
 _cp_build() {
     _src="$1"; _dest="$2"
     mkdir -p "$_dest" || return 1
+    [ -n "${ZSH_VERSION:-}" ] && setopt localoptions nonomatch
     for _e in "$_src"/* "$_src"/.[!.]*; do
         [ -e "$_e" ] || continue
         _b="${_e##*/}"
         _cp_is_skipped "$_b" && continue
+        _cp_is_shared "$_b" && continue
         rm -rf "$_dest/$_b" || return 1
-        if _cp_is_shared "$_b"; then
-            # Explicit if, not `[ -e ] && ln -s`: as the last statement of a
-            # branch, a false test would become the function's exit status.
-            if [ -e "$HOME/.claude/$_b" ]; then
-                ln -s "$HOME/.claude/$_b" "$_dest/$_b" || return 1
-            fi
-        else
-            # -L dereferences: relative symlink copied as link would resolve
-            # against profile directory and dangle. A profile is a snapshot,
-            # so copy content by value.
-            cp -RL "$_e" "$_dest/$_b" || return 1
-        fi
+        # -L dereferences: relative symlink copied as link would resolve
+        # against profile directory and dangle. A profile is a snapshot,
+        # so copy content by value.
+        cp -RL "$_e" "$_dest/$_b" || return 1
+    done
+    # Shared paths are linked from whatever currently exists in base, not from
+    # what happened to exist in $_src at this moment — a profile forked before
+    # first login, or from another profile that itself never got one of these
+    # (e.g. .credentials.json), must still pick it up here and on every later
+    # --update, same as --import already does.
+    for _b in $(printf '%s' "$_CP_SHARED"); do
+        [ -e "$HOME/.claude/$_b" ] || continue
+        rm -rf "$_dest/$_b" || return 1
+        ln -s "$HOME/.claude/$_b" "$_dest/$_b" || return 1
     done
     _cp_rewrite "$_dest/settings.json" "$_dest" "$_src" || return 1
     return 0
 }
 
 _cp_dir()    { printf '%s' "$(_cp_store)/profiles/$1"; }
-_cp_exists() { [ -d "$(_cp_dir "$1")" ]; }
+# _cp_valid_name gate is required here: _cp_dir "" is "<store>/profiles/",
+# which is always a directory, so without it an omitted/empty name would
+# validate as "exists" against the whole store.
+_cp_exists() { _cp_valid_name "$1" && [ -d "$(_cp_dir "$1")" ]; }
 _cp_valid_name() {
     case "$1" in
-        ""|.|..|*/*|-*) return 1 ;;
+        ""|.|..|*/*|-*|*[[:space:]]*) return 1 ;;
         *) return 0 ;;
     esac
 }
@@ -197,6 +204,7 @@ _cp_cmd_status() {
     printf 'store: %s\n' "$(_cp_store)"
     printf 'profiles:\n'
     if [ -d "$(_cp_store)/profiles" ]; then
+        [ -n "${ZSH_VERSION:-}" ] && setopt localoptions nonomatch
         for _p in "$(_cp_store)"/profiles/*; do
             [ -d "$_p" ] || continue
             printf '  %s\n' "${_p##*/}"
@@ -281,6 +289,12 @@ _cp_cmd_delete() {
     if ! _bk=$(_cp_backup "$_n"); then
         printf 'claude-profile: backup failed, not deleting "%s"\n' "$_n" >&2
         return 1
+    fi
+    # $CLAUDE_PROFILE or a pin can outrank active, so the deleted profile can
+    # be named in active without being the selected one — clear the dangling
+    # pointer rather than warn on every invocation forever, same as rename.
+    if [ "$(_cp_read_name "$(_cp_store)/active" 2>/dev/null)" = "$_n" ]; then
+        rm -f "$(_cp_store)/active"
     fi
     printf 'deleted %s (kept at %s)\n' "$_n" "$_bk"
 }
@@ -377,6 +391,7 @@ _cp_cmd_diff() {
 
 _cp_owned() {
     _d="$1"
+    [ -n "${ZSH_VERSION:-}" ] && setopt localoptions nonomatch
     for _e in "$_d"/* "$_d"/.[!.]*; do
         [ -e "$_e" ] || continue
         _b="${_e##*/}"
@@ -402,10 +417,15 @@ _cp_cmd_export() {
     fi
     printf 'claude-profile: archiving:\n' >&2
     sed 's/^/  /' "$_tmplist" >&2
+    # Remember whether $_out already existed: the redirect below truncates it
+    # regardless (ordinary shell behaviour), but the failure path must not go
+    # on to delete a file this tool did not create.
+    [ -e "$_out" ] && _out_existed=1 || _out_existed=0
     ( cd "$_d" && tar czf - -T "$_tmplist" ) > "$_out"
     _rc=$?
     if [ "$_rc" -ne 0 ]; then
-        rm -f "$_tmplist" "$_out"
+        rm -f "$_tmplist"
+        [ "$_out_existed" -eq 0 ] && rm -f "$_out"
         printf 'claude-profile: failed to write archive "%s"\n' "$_out" >&2
         return 1
     fi
@@ -430,8 +450,12 @@ _cp_cmd_import() {
     # containment relies on the tar binary's own behaviour (bsdtar and modern
     # GNU tar refuse to escape -C; unverified on older tar implementations).
     tar xzf "$_f" -C "$_d" || { rm -rf "$_d"; return 1; }
-    # Relink every shared path that exists in base.
-    for _b in $_CP_SHARED; do
+    # Relink every shared path that exists in base. Command substitution, not
+    # a bare $_CP_SHARED: zsh does not word-split an unquoted parameter
+    # expansion, so `for _b in $_CP_SHARED` runs once with the whole list as
+    # one word under zsh (21 iterations under bash) — it does split command
+    # substitution output, so that's what forces per-word iteration in both.
+    for _b in $(printf '%s' "$_CP_SHARED"); do
         [ -e "$HOME/.claude/$_b" ] || continue
         rm -rf "$_d/$_b" || { rm -rf "$_d"; return 1; }
         ln -s "$HOME/.claude/$_b" "$_d/$_b" || { rm -rf "$_d"; return 1; }
@@ -496,7 +520,7 @@ _cp_cmd_install_statusline() {
     fi
     {
         printf '%s\n' "$_CP_SL_START"
-        printf '[ -n "$CLAUDE_CONFIG_DIR" ] && printf '"'"' · [%%s]'"'"' "${CLAUDE_CONFIG_DIR##*/}"\n'
+        printf '[ -n "$CLAUDE_CONFIG_DIR" ] && [ "$CLAUDE_CONFIG_DIR" != "$HOME/.claude" ] && printf '"'"' · [%%s]'"'"' "${CLAUDE_CONFIG_DIR##*/}"\n'
         printf '%s\n' "$_CP_SL_END"
     } >> "$_f" || { printf 'claude-profile: failed to write %s\n' "$_f" >&2; return 1; }
     chmod +x "$_f" || return 1
