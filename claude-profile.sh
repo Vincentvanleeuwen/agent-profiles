@@ -83,22 +83,20 @@ _CP_SKIP=" .DS_Store "
 _cp_is_shared() { case "$_CP_SHARED" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 _cp_is_skipped(){ case "$_CP_SKIP"   in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
-# Rewrite ~/.claude/ prefixes in a settings.json so a profile uses its own
-# hooks, scripts and statusline. Paths outside the config dir are untouched.
+# _cp_rewrite SETTINGS_FILE PROFILE_DIR [SOURCE_DIR]
+# Rewrites ~/.claude/ prefixes to PROFILE_DIR. When SOURCE_DIR is given and is
+# not the base config dir, also rewrites SOURCE_DIR/ -> PROFILE_DIR/, which is
+# what makes a profile forked from another profile point at itself.
 _cp_rewrite() {
-    _f="$1"; _p="$2"
+    _f="$1"; _p="$2"; _rsrc="${3:-}"
     [ -f "$_f" ] || return 0
     _t="$_f.tmp.$$"
     sed -e "s#$HOME/\.claude/#$_p/#g" \
         -e "s#\$HOME/\.claude/#$_p/#g" \
         -e "s#~/\.claude/#$_p/#g" \
         "$_f" > "$_t" && mv "$_t" "$_f"
-    # ponytail: forking from another profile (not base) leaves that profile's
-    # own absolute path in settings.json; _src is set by _cp_build's caller
-    # (no `local` in this codebase, so it's already in scope) — rewrite it
-    # too so a fork doesn't keep pointing at its parent profile.
-    if [ -n "$_src" ]; then
-        sed -e "s#$_src/#$_p/#g" "$_f" > "$_t" && mv "$_t" "$_f"
+    if [ -n "$_rsrc" ]; then
+        sed -e "s#$_rsrc/#$_p/#g" "$_f" > "$_t" && mv "$_t" "$_f"
     fi
 }
 
@@ -118,5 +116,5 @@ _cp_build() {
             cp -R "$_e" "$_dest/$_b"
         fi
     done
-    _cp_rewrite "$_dest/settings.json" "$_dest"
+    _cp_rewrite "$_dest/settings.json" "$_dest" "$_src"
 }

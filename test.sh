@@ -109,5 +109,14 @@ eq "fork links to base not source" \
 check "fork rewrote paths to itself" \
    'grep -q "$TMP/store/profiles/forked/hooks/demo.sh" "$TMP/store/profiles/forked/settings.json"'
 
+# Regression: _cp_rewrite used to read $_src, a global _cp_build leaves set
+# after it returns (no `local` in POSIX sh). Call it directly with only 2
+# args on an unrelated file and confirm the stale global is never consulted.
+OTHER="$TMP/store/other-settings.json"
+printf '{"path": "%s/leftover"}\n' "$TMP/store/profiles/built" > "$OTHER"
+_cp_rewrite "$OTHER" "$TMP/store/profiles/unrelated"
+check "_cp_rewrite ignores stale global _src" \
+   'grep -q "$TMP/store/profiles/built/leftover" "$OTHER"'
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
