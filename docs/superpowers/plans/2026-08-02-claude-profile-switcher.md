@@ -975,10 +975,18 @@ _cp_cmd_rename() {
     _cp_exists "$_o" || { printf 'claude-profile: no such profile "%s"\n' "$_o" >&2; return 1; }
     _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
     _cp_exists "$_n" && { printf 'claude-profile: "%s" already exists\n' "$_n" >&2; return 1; }
-    mv "$(_cp_dir "$_o")" "$(_cp_dir "$_n")"
+    if ! mv "$(_cp_dir "$_o")" "$(_cp_dir "$_n")"; then
+        printf 'claude-profile: rename failed\n' >&2
+        return 1
+    fi
     # Third argument is the OLD profile dir: after the mv, settings.json still
     # carries the old profile's paths, and that pass is what retargets them.
-    _cp_rewrite "$(_cp_dir "$_n")/settings.json" "$(_cp_dir "$_n")" "$(_cp_dir "$_o")"
+    # No cleanup on failure — unlike create and copy, this directory already
+    # existed and holds the only copy of that data.
+    if ! _cp_rewrite "$(_cp_dir "$_n")/settings.json" "$(_cp_dir "$_n")" "$(_cp_dir "$_o")"; then
+        printf 'claude-profile: renamed to "%s" but path rewrite failed; fix settings.json paths manually\n' "$_n" >&2
+        return 1
+    fi
     if [ "$(_cp_read_name "$(_cp_store)/active" 2>/dev/null)" = "$_o" ]; then
         printf '%s\n' "$_n" > "$(_cp_store)/active"
     fi
@@ -990,7 +998,11 @@ _cp_cmd_copy() {
     _cp_exists "$_s" || { printf 'claude-profile: no such profile "%s"\n' "$_s" >&2; return 1; }
     _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
     _cp_exists "$_n" && { printf 'claude-profile: "%s" already exists\n' "$_n" >&2; return 1; }
-    _cp_build "$(_cp_dir "$_s")" "$(_cp_dir "$_n")"
+    if ! _cp_build "$(_cp_dir "$_s")" "$(_cp_dir "$_n")"; then
+        printf 'claude-profile: failed to copy "%s"\n' "$_s" >&2
+        rm -rf "$(_cp_dir "$_n")"
+        return 1
+    fi
     printf 'copied %s -> %s\n' "$_s" "$_n"
 }
 ```
