@@ -179,6 +179,25 @@ _cp_cmd_status() {
     fi
 }
 
+_CP_RUNNER=${_CP_RUNNER:-}
+
+_cp_run_claude() {
+    if [ -n "$_CP_RUNNER" ]; then
+        "$_CP_RUNNER" "$@"
+    else
+        command claude "$@"
+    fi
+}
+
+_cp_cmd_run() {
+    _n="$1"; shift
+    if ! _cp_exists "$_n"; then
+        printf 'claude-profile: no such profile "%s"\n' "$_n" >&2
+        return 1
+    fi
+    CLAUDE_CONFIG_DIR="$(_cp_dir "$_n")" _cp_run_claude "$@"
+}
+
 _cp_main() {
     case "${1:-}" in
         "")                 _cp_cmd_status ;;
@@ -186,7 +205,15 @@ _cp_main() {
         --create)           shift; _cp_cmd_create "$@" ;;
         -h|--help)          _cp_cmd_status ;;
         -*)                 printf 'claude-profile: unknown option %s\n' "$1" >&2; return 1 ;;
-        *)                  _cp_cmd_set "$1" ;;
+        *)
+            _n="$1"; shift
+            if [ "${1:-}" = "--" ]; then
+                shift
+                _cp_cmd_run "$_n" "$@"
+            else
+                _cp_cmd_set "$_n"
+            fi
+            ;;
     esac
 }
 

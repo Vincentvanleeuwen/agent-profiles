@@ -43,6 +43,7 @@ export CLAUDE_PROFILES_DIR
 mkdir -p "$CLAUDE_PROFILES_DIR"
 
 . "$HERE/claude-profile.sh"
+_cp_test_runner() { printf 'CFG=%s ARGS=%s\n' "$CLAUDE_CONFIG_DIR" "$*"; }
 
 echo "== Task 1: resolution =="
 
@@ -195,6 +196,18 @@ else
     eq "default left previous active intact" "$(cat "$TMP/store/active")" "dev"
     chmod 755 "$TMP/store"
 fi
+
+echo "== Task 4: one-shot run =="
+
+_cp_main dev >/dev/null
+
+out=$(_CP_RUNNER='_cp_test_runner' _cp_main fin -- --version 2>&1)
+eq "one-shot used fin dir" "$out" "CFG=$TMP/store/profiles/fin ARGS=--version"
+eq "active unchanged after one-shot" "$(cat "$TMP/store/active")" "dev"
+
+out=$(_CP_RUNNER='_cp_test_runner' _cp_main ghost -- --version 2>&1)
+check "one-shot on unknown profile errors" 'printf "%s" "$out" | grep -q "no such profile"'
+unset _CP_RUNNER
 
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
