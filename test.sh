@@ -506,6 +506,7 @@ check "no hardcoded home"  '! grep -q "/Users/" "$HERE/claude-profile.sh"'
 
 check "help lists create" '_cp_main --help | grep -q -- "--create"'
 check "help lists export" '_cp_main --help | grep -q -- "--export"'
+check "status names the store path" '_cp_main | grep -q "^store: "'
 check "README exists"     '[ -f "$HERE/README.md" ]'
 check "README warns about profiles being ignored" 'grep -q "gitignore" "$HERE/README.md"'
 

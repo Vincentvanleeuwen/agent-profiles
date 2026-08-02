@@ -59,8 +59,12 @@ Most specific wins:
 
 ## Shared vs per-profile
 
-Per-profile (copied): `settings.json`, `CLAUDE.md`, `skills/`, `commands/`,
-`hooks/`, `agents/`, `scripts/`, `statusline.sh`, `.claude.json`.
+Per-profile (copied): everything not on the shared list below — `settings.json`,
+`CLAUDE.md`, `skills/`, `commands/`, `hooks/`, `agents/`, `scripts/`,
+`statusline.sh`, `.claude.json`, and anything else sitting in `~/.claude`
+(`.caveman-active`, `teams/`, `agentic-os/`, whatever a future Claude Code
+version adds). It's copy-the-rest, not an allowlist, so nothing here needs
+updating when Claude Code grows a new config file.
 
 Shared across all profiles (symlinked back to `~/.claude`): `plugins/` (the
 download cache — install once, enable per profile in `settings.json`),
@@ -99,13 +103,17 @@ There is no `--restore` command. Both commands move the profile's previous
 contents to `.backups/<name>-<timestamp>/` before writing, so recovery is a
 manual copy:
 
+`claude profile` prints a `store: <path>` line — that's the directory below.
+Substitute it for `<store>`:
+
 ```sh
-ls "$(claude profile)/../.backups/"                       # find the timestamp
-rm -rf ~/claude-profiles/profiles/<name>                  # or wherever it landed
-cp -R ~/claude-profiles/.backups/<name>-<timestamp> ~/claude-profiles/profiles/<name>
+ls <store>/.backups/                          # find the timestamp
+rm -rf <store>/profiles/<name>                # or wherever it landed
+cp -R <store>/.backups/<name>-<timestamp> <store>/profiles/<name>
 ```
 
-(Adjust the store path if you've set `CLAUDE_PROFILES_DIR`.)
+`<store>` is `~/claude-profiles` by default, or `$CLAUDE_PROFILES_DIR` if you set it —
+which is exactly why the status output names it rather than making you guess.
 
 ## Uninstall
 

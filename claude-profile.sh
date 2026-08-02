@@ -191,6 +191,7 @@ _cp_cmd_status() {
     else
         printf 'active: %s  (%s)\n' "$_sel" "$_CP_SRC"
     fi
+    printf 'store: %s\n' "$(_cp_store)"
     printf 'profiles:\n'
     if [ -d "$(_cp_store)/profiles" ]; then
         for _p in "$(_cp_store)"/profiles/*; do
