@@ -445,6 +445,19 @@ _cp_cmd_import() {
 _CP_SL_START="# CLAUDE_PROFILE_BLOCK start"
 _CP_SL_END="# CLAUDE_PROFILE_BLOCK end"
 
+# Backs up $1 to $1.bak, unless .bak already exists — that's the pre-block
+# original and the most valuable thing to preserve, so it is never
+# overwritten. A later call instead writes a timestamped sibling and says so.
+_cp_backup_statusline() {
+    if [ -f "$1.bak" ]; then
+        _stamp=$(date +%Y%m%d-%H%M%S)
+        cp "$1" "$1.bak.$_stamp" || { printf 'claude-profile: failed to back up %s\n' "$1" >&2; return 1; }
+        printf 'claude-profile: %s.bak already exists, wrote %s.bak.%s instead\n' "$1" "$1" "$_stamp" >&2
+    else
+        cp "$1" "$1.bak" || { printf 'claude-profile: failed to back up %s\n' "$1" >&2; return 1; }
+    fi
+}
+
 # Appends a guarded, idempotent block to ~/.claude/statusline.sh that prints
 # the active profile name. The only command in this tool that writes to the
 # real ~/.claude — everything else is profile-scoped. Silent (prints nothing
@@ -457,11 +470,11 @@ _cp_cmd_install_statusline() {
             printf 'statusline block already installed\n'
             return 0
         fi
-        cp "$_f" "$_f.bak" || { printf 'claude-profile: failed to back up %s\n' "$_f" >&2; return 1; }
+        _cp_backup_statusline "$_f" || return 1
     else
         mkdir -p "$HOME/.claude" || return 1
         printf '#!/bin/sh\n' > "$_f" || { printf 'claude-profile: failed to create %s\n' "$_f" >&2; return 1; }
-        cp "$_f" "$_f.bak" || { printf 'claude-profile: failed to back up %s\n' "$_f" >&2; return 1; }
+        _cp_backup_statusline "$_f" || return 1
     fi
     {
         printf '%s\n' "$_CP_SL_START"

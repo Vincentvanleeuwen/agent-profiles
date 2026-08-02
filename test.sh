@@ -428,6 +428,26 @@ _cp_main --uninstall-statusline >/dev/null
 check "block removed"      '! grep -q "CLAUDE_PROFILE_BLOCK" "$FAKEHOME/.claude/statusline.sh"'
 check "original still there" 'grep -q "printf hud" "$FAKEHOME/.claude/statusline.sh"'
 
+# A second install must never clobber the first backup — it holds the true
+# pre-block original, which is the most valuable thing to preserve.
+printf 'hand edited after uninstall\n' >> "$FAKEHOME/.claude/statusline.sh"
+_cp_main --install-statusline >/dev/null
+eq "first backup still holds the true original" \
+   "$(cat "$FAKEHOME/.claude/statusline.sh.bak")" "$_slorig"
+_bakcount=$(ls "$FAKEHOME"/.claude/statusline.sh.bak.* 2>/dev/null | wc -l | tr -d ' ')
+eq "timestamped sibling backup created" "$_bakcount" "1"
+check "timestamped sibling holds the edited state" \
+  'grep -q "hand edited after uninstall" "$FAKEHOME"/.claude/statusline.sh.bak.*'
+rm -f "$FAKEHOME"/.claude/statusline.sh.bak.*
+_cp_main --uninstall-statusline >/dev/null
+
+# A profile created before install must NOT carry the block — the contrast
+# that proves inherit-after-install isn't just always-present.
+_cp_main --create noblock >/dev/null
+check "profile created before install has no block" \
+  '! grep -q "CLAUDE_PROFILE_BLOCK" "$TMP/store/profiles/noblock/statusline.sh"'
+_CP_YES=1 _cp_main --delete noblock >/dev/null
+
 # A profile created after install inherits the block through the normal copy.
 _cp_main --install-statusline >/dev/null
 _cp_main --create sl >/dev/null
