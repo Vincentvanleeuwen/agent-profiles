@@ -175,5 +175,26 @@ _cp_main --create "" >/dev/null 2>&1
 eq "create rejects empty name" "$?" "1"
 eq "empty name made no dir" "$(find "$TMP/store/profiles" -maxdepth 1 -type d | wc -l)" "$before"
 
+# Write guards on an unwritable store. chmod cannot deny root, so the
+# assertion would pass for the wrong reason under a root-run CI — skip
+# explicitly rather than assert something chmod never enforced.
+if [ "$(id -u)" -eq 0 ]; then
+    printf '  skip write-guard tests (running as root, chmod cannot deny)\n'
+else
+    _cp_main default >/dev/null
+    chmod 555 "$TMP/store"
+    _cp_main dev >/dev/null 2>&1
+    eq "set fails loudly on unwritable store" "$?" "1"
+    check "set wrote nothing" '[ ! -f "$TMP/store/active" ]'
+    chmod 755 "$TMP/store"
+
+    _cp_main dev >/dev/null
+    chmod 555 "$TMP/store"
+    _cp_main default >/dev/null 2>&1
+    eq "default fails loudly on unwritable store" "$?" "1"
+    eq "default left previous active intact" "$(cat "$TMP/store/active")" "dev"
+    chmod 755 "$TMP/store"
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

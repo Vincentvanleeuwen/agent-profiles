@@ -156,7 +156,7 @@ _cp_cmd_set() {
 
 _cp_cmd_default() {
     rm -f "$(_cp_store)/active" 2>/dev/null
-    if [ -f "$(_cp_store)/active" ]; then
+    if [ -e "$(_cp_store)/active" ]; then
         printf 'claude-profile: could not remove %s/active\n' "$(_cp_store)" >&2
         return 1
     fi
