@@ -451,8 +451,14 @@ _CP_SL_END="# CLAUDE_PROFILE_BLOCK end"
 _cp_backup_statusline() {
     if [ -f "$1.bak" ]; then
         _stamp=$(date +%Y%m%d-%H%M%S)
-        cp "$1" "$1.bak.$_stamp" || { printf 'claude-profile: failed to back up %s\n' "$1" >&2; return 1; }
-        printf 'claude-profile: %s.bak already exists, wrote %s.bak.%s instead\n' "$1" "$1" "$_stamp" >&2
+        _dst="$1.bak.$_stamp"
+        _i=1
+        while [ -e "$_dst" ]; do
+            _dst="$1.bak.$_stamp-$_i"
+            _i=$((_i + 1))
+        done
+        cp "$1" "$_dst" || { printf 'claude-profile: failed to back up %s\n' "$1" >&2; return 1; }
+        printf 'claude-profile: %s.bak already exists, wrote %s instead\n' "$1" "$_dst" >&2
     else
         cp "$1" "$1.bak" || { printf 'claude-profile: failed to back up %s\n' "$1" >&2; return 1; }
     fi

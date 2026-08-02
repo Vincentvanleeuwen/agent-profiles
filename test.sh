@@ -441,6 +441,23 @@ check "timestamped sibling holds the edited state" \
 rm -f "$FAKEHOME"/.claude/statusline.sh.bak.*
 _cp_main --uninstall-statusline >/dev/null
 
+# Two backups landing in the same wall-clock second must not collide either —
+# the timestamped sibling name needs its own uniqueness check.
+date() { printf '%s\n' "20260101-000000"; }
+printf 'stub original\n' > "$FAKEHOME/.claude/statusline.sh"
+cp "$FAKEHOME/.claude/statusline.sh" "$FAKEHOME/.claude/statusline.sh.bak"
+printf 'edit one\n' > "$FAKEHOME/.claude/statusline.sh"
+_cp_backup_statusline "$FAKEHOME/.claude/statusline.sh" >/dev/null 2>&1
+printf 'edit two\n' > "$FAKEHOME/.claude/statusline.sh"
+_cp_backup_statusline "$FAKEHOME/.claude/statusline.sh" >/dev/null 2>&1
+unset -f date
+check "same-second sibling one exists" '[ -e "$FAKEHOME/.claude/statusline.sh.bak.20260101-000000" ]'
+check "same-second sibling two exists" '[ -e "$FAKEHOME/.claude/statusline.sh.bak.20260101-000000-1" ]'
+check "sibling one holds edit one" 'grep -q "edit one" "$FAKEHOME/.claude/statusline.sh.bak.20260101-000000"'
+check "sibling two holds edit two" 'grep -q "edit two" "$FAKEHOME/.claude/statusline.sh.bak.20260101-000000-1"'
+rm -f "$FAKEHOME"/.claude/statusline.sh.bak*
+printf '%s\n' "$_slorig" > "$FAKEHOME/.claude/statusline.sh"
+
 # A profile created before install must NOT carry the block — the contrast
 # that proves inherit-after-install isn't just always-present.
 _cp_main --create noblock >/dev/null
