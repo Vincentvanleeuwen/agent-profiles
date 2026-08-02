@@ -207,6 +207,35 @@ else
     check "update backup failure errors on stderr" 'printf "%s" "$out" | grep -q "backup failed"'
     check "failed backup left profile untouched" '[ -f "$TMP/store/profiles/fin/CLAUDE.md" ]'
     chmod 755 "$TMP/store/.backups"
+
+    # Task 5b: a failed copy/rewrite mid-_cp_build must fail the whole
+    # build, not silently report success with a half-populated profile.
+    chmod 000 "$FAKEHOME/.claude/skills/demo/SKILL.md"
+    _cp_main default >/dev/null
+    _cp_main --create propfail >/dev/null 2>&1
+    eq "create fails loudly when copy fails" "$?" "1"
+    check "create removed the partial profile" '[ ! -d "$TMP/store/profiles/propfail" ]'
+    chmod 644 "$FAKEHOME/.claude/skills/demo/SKILL.md"
+
+    _cp_main dev >/dev/null
+    chmod 000 "$TMP/store/profiles/dev/skills/demo/SKILL.md"
+    out=$(_cp_main --update fin 2>&1)
+    eq "update fails loudly when rebuild fails" "$?" "1"
+    check "update failure names the backup path" 'printf "%s" "$out" | grep -q "previous contents at"'
+    check "update backup still exists after failed rebuild" 'ls -d "$TMP/store/.backups/fin-"* >/dev/null 2>&1'
+    chmod 644 "$TMP/store/profiles/dev/skills/demo/SKILL.md"
+    # Clean up so later glob-based backup checks (Task 5) only see their own backup.
+    rm -rf "$TMP/store/.backups"/fin-*
+
+    mkdir -p "$TMP/rwtest"
+    printf '{"a":"%s/.claude/x"}' "$HOME" > "$TMP/rwtest/settings.json"
+    chmod 555 "$TMP/rwtest"
+    _cp_rewrite "$TMP/rwtest/settings.json" "$TMP/store/profiles/dev" 2>/dev/null
+    eq "rewrite fails when it cannot write" "$?" "1"
+    chmod 755 "$TMP/rwtest"
+    rm -rf "$TMP/rwtest"
+
+    check "no temp files left behind" '[ -z "$(find "$TMP/store/profiles" -name "*.tmp.*" 2>/dev/null)" ]'
 fi
 
 echo "== Task 4: one-shot run =="

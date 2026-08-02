@@ -91,32 +91,45 @@ _cp_rewrite() {
     _f="$1"; _p="$2"; _rsrc="${3:-}"
     [ -f "$_f" ] || return 0
     _t="$_f.tmp.$$"
-    sed -e "s#$HOME/\.claude/#$_p/#g" \
-        -e "s#\$HOME/\.claude/#$_p/#g" \
-        -e "s#~/\.claude/#$_p/#g" \
-        "$_f" > "$_t" && mv "$_t" "$_f"
-    if [ -n "$_rsrc" ]; then
-        sed -e "s#$_rsrc/#$_p/#g" "$_f" > "$_t" && mv "$_t" "$_f"
+    if ! sed -e "s#$HOME/\.claude/#$_p/#g" \
+             -e "s#\$HOME/\.claude/#$_p/#g" \
+             -e "s#~/\.claude/#$_p/#g" \
+             "$_f" > "$_t"; then
+        rm -f "$_t"
+        return 1
     fi
+    mv "$_t" "$_f" || { rm -f "$_t"; return 1; }
+    if [ -n "$_rsrc" ]; then
+        if ! sed -e "s#$_rsrc/#$_p/#g" "$_f" > "$_t"; then
+            rm -f "$_t"
+            return 1
+        fi
+        mv "$_t" "$_f" || { rm -f "$_t"; return 1; }
+    fi
+    return 0
 }
 
 # Populate $2 as a profile built from config dir $1.
 _cp_build() {
     _src="$1"; _dest="$2"
-    mkdir -p "$_dest"
+    mkdir -p "$_dest" || return 1
     for _e in "$_src"/* "$_src"/.[!.]*; do
         [ -e "$_e" ] || continue
         _b="${_e##*/}"
         _cp_is_skipped "$_b" && continue
+        rm -rf "$_dest/$_b" || return 1
         if _cp_is_shared "$_b"; then
-            rm -rf "$_dest/$_b"
-            [ -e "$HOME/.claude/$_b" ] && ln -s "$HOME/.claude/$_b" "$_dest/$_b"
+            # Explicit if, not `[ -e ] && ln -s`: as the last statement of a
+            # branch, a false test would become the function's exit status.
+            if [ -e "$HOME/.claude/$_b" ]; then
+                ln -s "$HOME/.claude/$_b" "$_dest/$_b" || return 1
+            fi
         else
-            rm -rf "$_dest/$_b"
-            cp -R "$_e" "$_dest/$_b"
+            cp -R "$_e" "$_dest/$_b" || return 1
         fi
     done
-    _cp_rewrite "$_dest/settings.json" "$_dest" "$_src"
+    _cp_rewrite "$_dest/settings.json" "$_dest" "$_src" || return 1
+    return 0
 }
 
 _cp_dir()    { printf '%s' "$(_cp_store)/profiles/$1"; }
@@ -137,7 +150,11 @@ _cp_cmd_create() {
     fi
     _from=$(_cp_resolve) || return 1
     mkdir -p "$(_cp_store)/profiles"
-    _cp_build "$_from" "$(_cp_dir "$_n")"
+    if ! _cp_build "$_from" "$(_cp_dir "$_n")"; then
+        printf 'claude-profile: failed to build "%s"\n' "$_n" >&2
+        rm -rf "$(_cp_dir "$_n")"
+        return 1
+    fi
     printf 'created %s <- %s\n' "$_n" "$_from"
 }
 
@@ -222,7 +239,10 @@ _cp_cmd_update() {
         printf 'claude-profile: backup failed, not updating "%s"\n' "$_n" >&2
         return 1
     fi
-    _cp_build "$_from" "$(_cp_dir "$_n")"
+    if ! _cp_build "$_from" "$(_cp_dir "$_n")"; then
+        printf 'claude-profile: failed to rebuild "%s"; previous contents at %s\n' "$_n" "$_bk" >&2
+        return 1
+    fi
     printf 'backed up -> %s\n' "$_bk"
     printf 'updated %s <- %s\n' "$_n" "$_from"
 }
