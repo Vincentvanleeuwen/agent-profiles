@@ -728,6 +728,164 @@ git commit -m "feat: update profiles with mirror semantics and backups"
 
 ---
 
+### Task 5b: Propagate failures out of `_cp_build` and `_cp_rewrite`
+
+Added mid-execution after review of Task 5. Not speculative hardening: the
+reviewer forced a permission-denied on one file mid-`cp -R` against the
+then-current code and got exit 0, `updated fin <- …`, and a profile with an
+empty `skills/b`. The backup succeeded, the rebuild half-failed, and the tool
+reported success.
+
+`_cp_build` and `_cp_rewrite` are the primitives every profile-writing command
+routes through. Task 6 adds `--copy` as a third caller and Task 8 adds
+`--import` as a fourth. Fixing the primitives once is smaller than retrofitting
+four call sites, which is why this lands before Task 6 rather than after.
+
+**Files:**
+- Modify: `claude-profile.sh` (`_cp_rewrite`, `_cp_build`, `_cp_cmd_create`, `_cp_cmd_update`)
+- Modify: `test.sh`
+
+**Interfaces:**
+- Consumes: everything from Tasks 2, 3, 5.
+- Produces: no new functions. `_cp_rewrite` and `_cp_build` return non-zero on any failed step; `_cp_cmd_create` and `_cp_cmd_update` abort and report failure instead of printing success.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `test.sh` before the summary block, inside a non-root guard:
+
+```sh
+echo "== Task 5b: failure propagation =="
+
+if [ "$(id -u)" -eq 0 ]; then
+    printf '  skip failure-propagation tests (running as root)\n'
+else
+    # A copy that cannot complete must fail the build, not report success.
+    _cp_main --create propsrc >/dev/null
+    mkdir -p "$FAKEHOME/.claude/skills/locked"
+    printf 'x\n' > "$FAKEHOME/.claude/skills/locked/SKILL.md"
+    chmod 000 "$FAKEHOME/.claude/skills/locked/SKILL.md"
+
+    _cp_build "$FAKEHOME/.claude" "$TMP/store/profiles/halfbuilt" 2>/dev/null
+    eq "build fails when a copy fails" "$?" "1"
+
+    out=$(_cp_main --create halfcreate 2>&1)
+    eq "create fails when build fails" "$?" "1"
+    check "create reports no success" '! printf "%s" "$out" | grep -q "^created"'
+
+    chmod 644 "$FAKEHOME/.claude/skills/locked/SKILL.md"
+    rm -rf "$FAKEHOME/.claude/skills/locked" \
+           "$TMP/store/profiles/halfbuilt" "$TMP/store/profiles/halfcreate"
+    _CP_YES=1 _cp_main --delete propsrc >/dev/null 2>&1 || rm -rf "$TMP/store/profiles/propsrc"
+
+    # An unwritable settings.json must fail the rewrite.
+    mkdir -p "$TMP/rwtest"
+    printf '{"a":"%s/.claude/hooks/h.sh"}\n' "$FAKEHOME" > "$TMP/rwtest/settings.json"
+    chmod 555 "$TMP/rwtest"
+    _cp_rewrite "$TMP/rwtest/settings.json" "$TMP/store/profiles/dev" 2>/dev/null
+    eq "rewrite fails when it cannot write" "$?" "1"
+    chmod 755 "$TMP/rwtest"
+    rm -rf "$TMP/rwtest"
+fi
+
+check "no temp files left behind" '[ -z "$(find "$TMP/store/profiles" -name "*.tmp.*" 2>/dev/null)" ]'
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `sh test.sh`
+Expected: FAIL on `build fails when a copy fails` (got 0, want 1) and `create fails when build fails`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Replace `_cp_rewrite` and `_cp_build` with guarded versions:
+
+```sh
+_cp_rewrite() {
+    _f="$1"; _p="$2"; _rsrc="${3:-}"
+    [ -f "$_f" ] || return 0
+    _t="$_f.tmp.$$"
+    if ! sed -e "s#$HOME/\.claude/#$_p/#g" \
+             -e "s#\$HOME/\.claude/#$_p/#g" \
+             -e "s#~/\.claude/#$_p/#g" \
+             "$_f" > "$_t"; then
+        rm -f "$_t"
+        return 1
+    fi
+    mv "$_t" "$_f" || { rm -f "$_t"; return 1; }
+    if [ -n "$_rsrc" ]; then
+        if ! sed -e "s#$_rsrc/#$_p/#g" "$_f" > "$_t"; then
+            rm -f "$_t"
+            return 1
+        fi
+        mv "$_t" "$_f" || { rm -f "$_t"; return 1; }
+    fi
+    return 0
+}
+
+_cp_build() {
+    _src="$1"; _dest="$2"
+    mkdir -p "$_dest" || return 1
+    for _e in "$_src"/* "$_src"/.[!.]*; do
+        [ -e "$_e" ] || continue
+        _b="${_e##*/}"
+        _cp_is_skipped "$_b" && continue
+        rm -rf "$_dest/$_b" || return 1
+        if _cp_is_shared "$_b"; then
+            # Explicit if, not `[ -e ] && ln -s`: as the last statement of a
+            # branch, a false test would become the function's exit status.
+            if [ -e "$HOME/.claude/$_b" ]; then
+                ln -s "$HOME/.claude/$_b" "$_dest/$_b" || return 1
+            fi
+        else
+            cp -R "$_e" "$_dest/$_b" || return 1
+        fi
+    done
+    _cp_rewrite "$_dest/settings.json" "$_dest" "$_src" || return 1
+    return 0
+}
+```
+
+Then guard both callers. In `_cp_cmd_create`, replace the unchecked build and
+unconditional success message:
+
+```sh
+    if ! _cp_build "$_from" "$(_cp_dir "$_n")"; then
+        printf 'claude-profile: failed to build "%s"\n' "$_n" >&2
+        rm -rf "$(_cp_dir "$_n")"
+        return 1
+    fi
+    printf 'created %s <- %s\n' "$_n" "$_from"
+```
+
+Removing the partial directory matters: a half-built profile left on disk is
+selectable by name and loads as a broken config. `create` is the only command
+that may remove one, because it is the only one where the directory did not
+exist beforehand.
+
+In `_cp_cmd_update`, the profile's previous contents are already safe in the
+backup, so report the failure and point at it rather than deleting anything:
+
+```sh
+    if ! _cp_build "$_from" "$(_cp_dir "$_n")"; then
+        printf 'claude-profile: failed to rebuild "%s"; previous contents are at %s\n' "$_n" "$_bk" >&2
+        return 1
+    fi
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `sh test.sh` then `bash test.sh`
+Expected: both print `all passed`, all prior assertions still green.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add claude-profile.sh test.sh
+git commit -m "fix: propagate failures out of profile build and rewrite"
+```
+
+---
+
 ### Task 6: `--delete`, `--rename`, `--copy`
 
 **Files:**
