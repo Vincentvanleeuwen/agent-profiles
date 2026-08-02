@@ -303,6 +303,58 @@ _cp_cmd_copy() {
     printf 'copied %s -> %s\n' "$_s" "$_n"
 }
 
+_cp_summary() {
+    _d="$1"
+    python3 - "$_d" <<'PY'
+import json, os, sys
+
+d = sys.argv[1]
+
+def load(p):
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+s = load(os.path.join(d, "settings.json"))
+
+plugins = sorted(k for k, v in (s.get("enabledPlugins") or {}).items() if v)
+hooks = sum(len(v) for v in (s.get("hooks") or {}).values())
+
+skills_dir = os.path.join(d, "skills")
+skills = sorted(
+    e for e in os.listdir(skills_dir)
+    if not e.startswith(".") and os.path.isdir(os.path.join(skills_dir, e))
+) if os.path.isdir(skills_dir) else []
+
+mcp = sorted((load(os.path.join(d, ".claude.json")).get("mcpServers") or {}))
+
+print("  model    %s" % (s.get("model") or "-"))
+print("  plugins  %s" % (", ".join(plugins) or "-"))
+print("  skills   %s" % (", ".join(skills) or "-"))
+print("  hooks    %d" % hooks)
+print("  mcp      %s" % (", ".join(mcp) or "-"))
+PY
+}
+
+_cp_cmd_show() {
+    _n="$1"
+    _cp_exists "$_n" || { printf 'claude-profile: no such profile "%s"\n' "$_n" >&2; return 1; }
+    printf '%s\n' "$_n"
+    _cp_summary "$(_cp_dir "$_n")"
+}
+
+_cp_cmd_diff() {
+    _a="$1"; _b="$2"
+    _cp_exists "$_a" || { printf 'claude-profile: no such profile "%s"\n' "$_a" >&2; return 1; }
+    _cp_exists "$_b" || { printf 'claude-profile: no such profile "%s"\n' "$_b" >&2; return 1; }
+    printf '%s\n' "$_a"
+    _cp_summary "$(_cp_dir "$_a")"
+    printf '%s\n' "$_b"
+    _cp_summary "$(_cp_dir "$_b")"
+}
+
 _cp_main() {
     case "${1:-}" in
         "")                 _cp_cmd_status ;;
@@ -312,6 +364,8 @@ _cp_main() {
         --delete)           shift; _cp_cmd_delete "$@" ;;
         --rename)           shift; _cp_cmd_rename "$@" ;;
         --copy)             shift; _cp_cmd_copy "$@" ;;
+        --show)             shift; _cp_cmd_show "$@" ;;
+        --diff)             shift; _cp_cmd_diff "$@" ;;
         -h|--help)          _cp_cmd_status ;;
         -*)                 printf 'claude-profile: unknown option %s\n' "$1" >&2; return 1 ;;
         *)

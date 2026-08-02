@@ -318,5 +318,31 @@ _CP_YES=1 _cp_main --delete tmp3 >/dev/null
 _CP_YES=1 _cp_main --delete tmp4 >/dev/null
 unset _CP_YES
 
+echo "== Task 7: show and diff =="
+
+out=$(_cp_main --show dev)
+check "show reports model"          'printf "%s" "$out" | grep -q "model .*opus-5"'
+check "show lists enabled plugin"   'printf "%s" "$out" | grep -q "alpha@m"'
+check "show omits disabled plugin"  '! printf "%s" "$out" | grep -q "beta@m"'
+check "show lists skills"           'printf "%s" "$out" | grep -q "demo"'
+check "show counts hooks"           'printf "%s" "$out" | grep -q "hooks .*1"'
+
+python3 - "$TMP/store/profiles/fin/settings.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["model"] = "haiku-4-5"
+d["enabledPlugins"] = {"alpha@m": False, "beta@m": True}
+json.dump(d, open(p, "w"), indent=2)
+PY
+rm -rf "$TMP/store/profiles/fin/skills/demo"
+
+out=$(_cp_main --diff dev fin)
+check "diff shows both models"  'printf "%s" "$out" | grep -q "opus-5" && printf "%s" "$out" | grep -q "haiku-4-5"'
+check "diff shows plugin delta" 'printf "%s" "$out" | grep -q "alpha@m"'
+
+_cp_main --show ghost >/dev/null 2>&1
+eq "show refuses unknown profile" "$?" "1"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
