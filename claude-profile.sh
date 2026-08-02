@@ -222,8 +222,16 @@ _cp_cmd_run() {
 _cp_backup() {
     _n="$1"
     _stamp=$(date +%Y%m%d-%H%M%S)
-    _dst="$(_cp_store)/.backups/$_n-$_stamp"
     mkdir -p "$(_cp_store)/.backups" || return 1
+    # Never write into an existing path: mv into an existing directory nests
+    # inside it rather than failing, which would leave two generations stacked
+    # with only the first reachable at the reported path.
+    _dst="$(_cp_store)/.backups/$_n-$_stamp"
+    _i=1
+    while [ -e "$_dst" ]; do
+        _dst="$(_cp_store)/.backups/$_n-$_stamp-$_i"
+        _i=$((_i + 1))
+    done
     mv "$(_cp_dir "$_n")" "$_dst" || return 1
     printf '%s' "$_dst"
 }

@@ -472,5 +472,25 @@ check "new profile inherits block" 'grep -q "CLAUDE_PROFILE_BLOCK" "$TMP/store/p
 _CP_YES=1 _cp_main --delete sl >/dev/null
 _cp_main --uninstall-statusline >/dev/null
 
+echo "== Task 5c: backup collision =="
+
+_cp_main --create colla >/dev/null
+printf 'gen1\n' > "$TMP/store/profiles/colla/GEN.md"
+
+# Force both backups into the same timestamp.
+date() { printf '20260101-000000\n'; }
+
+bk1=$(_cp_backup colla)
+_cp_main --create colla >/dev/null
+printf 'gen2\n' > "$TMP/store/profiles/colla/GEN.md"
+bk2=$(_cp_backup colla)
+
+unset -f date
+
+check "collision produced two distinct paths" '[ "$bk1" != "$bk2" ]'
+check "first backup holds gen1"  'grep -q gen1 "$bk1/GEN.md"'
+check "second backup holds gen2" 'grep -q gen2 "$bk2/GEN.md"'
+check "no nesting inside first backup" '[ ! -d "$bk1/colla" ]'
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
