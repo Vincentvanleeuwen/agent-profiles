@@ -442,6 +442,54 @@ _cp_cmd_import() {
     printf 'imported %s <- %s\n' "$_n" "$_f"
 }
 
+_CP_SL_START="# CLAUDE_PROFILE_BLOCK start"
+_CP_SL_END="# CLAUDE_PROFILE_BLOCK end"
+
+# Appends a guarded, idempotent block to ~/.claude/statusline.sh that prints
+# the active profile name. The only command in this tool that writes to the
+# real ~/.claude — everything else is profile-scoped. Silent (prints nothing
+# at statusline-render time) when no profile is active, so base behaviour is
+# unchanged until someone actually switches.
+_cp_cmd_install_statusline() {
+    _f="$HOME/.claude/statusline.sh"
+    if [ -f "$_f" ]; then
+        if grep -q "$_CP_SL_START" "$_f"; then
+            printf 'statusline block already installed\n'
+            return 0
+        fi
+        cp "$_f" "$_f.bak" || { printf 'claude-profile: failed to back up %s\n' "$_f" >&2; return 1; }
+    else
+        mkdir -p "$HOME/.claude" || return 1
+        printf '#!/bin/sh\n' > "$_f" || { printf 'claude-profile: failed to create %s\n' "$_f" >&2; return 1; }
+        cp "$_f" "$_f.bak" || { printf 'claude-profile: failed to back up %s\n' "$_f" >&2; return 1; }
+    fi
+    {
+        printf '%s\n' "$_CP_SL_START"
+        printf '[ -n "$CLAUDE_CONFIG_DIR" ] && printf '"'"' · [%%s]'"'"' "${CLAUDE_CONFIG_DIR##*/}"\n'
+        printf '%s\n' "$_CP_SL_END"
+    } >> "$_f" || { printf 'claude-profile: failed to write %s\n' "$_f" >&2; return 1; }
+    chmod +x "$_f" || return 1
+    printf 'statusline block installed\n'
+}
+
+_cp_cmd_uninstall_statusline() {
+    _f="$HOME/.claude/statusline.sh"
+    [ -f "$_f" ] || { printf 'no statusline.sh\n'; return 0; }
+    grep -q "$_CP_SL_START" "$_f" || { printf 'statusline block not installed\n'; return 0; }
+    # A hand-edited or truncated marker leaves the range unbalanced. sed's
+    # /start/,/end/d with no matching end deletes to EOF, so refuse rather
+    # than risk eating everything after the start marker.
+    if ! grep -q "$_CP_SL_END" "$_f"; then
+        printf 'claude-profile: "%s" has a start marker but no end marker; refusing to touch it\n' "$_f" >&2
+        return 1
+    fi
+    _t="$_f.tmp.$$"
+    sed -e "/$_CP_SL_START/,/$_CP_SL_END/d" "$_f" > "$_t" || { rm -f "$_t"; printf 'claude-profile: failed to rewrite %s\n' "$_f" >&2; return 1; }
+    mv "$_t" "$_f" || { rm -f "$_t"; printf 'claude-profile: failed to rewrite %s\n' "$_f" >&2; return 1; }
+    chmod +x "$_f" || return 1
+    printf 'statusline block removed\n'
+}
+
 _cp_main() {
     case "${1:-}" in
         "")                 _cp_cmd_status ;;
@@ -455,6 +503,8 @@ _cp_main() {
         --diff)             shift; _cp_cmd_diff "$@" ;;
         --export)           shift; _cp_cmd_export "$@" ;;
         --import)           shift; _cp_cmd_import "$@" ;;
+        --install-statusline)   _cp_cmd_install_statusline ;;
+        --uninstall-statusline) _cp_cmd_uninstall_statusline ;;
         -h|--help)          _cp_cmd_status ;;
         -*)                 printf 'claude-profile: unknown option %s\n' "$1" >&2; return 1 ;;
         *)

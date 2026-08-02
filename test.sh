@@ -392,5 +392,48 @@ check "no archive written" '[ ! -e "$TMP/leaky.tar.gz" ]'
 _CP_YES=1 _cp_main --delete leaky >/dev/null
 _CP_YES=1 _cp_main --delete imported >/dev/null
 
+echo "== Task 9: statusline =="
+
+# Uninstalling a block that was never installed must be a harmless no-op,
+# not a false "removed" message, and must not touch the file.
+_slorig=$(cat "$FAKEHOME/.claude/statusline.sh")
+_cp_main --uninstall-statusline >/dev/null 2>&1
+eq "uninstall on pristine file is a no-op" "$?" "0"
+eq "pristine file untouched" "$(cat "$FAKEHOME/.claude/statusline.sh")" "$_slorig"
+
+# A hand-truncated end marker leaves the range unbalanced. sed's
+# /start/,/end/d with no matching end deletes to EOF — must refuse instead.
+printf '\n# CLAUDE_PROFILE_BLOCK start\nunterminated block content\n' >> "$FAKEHOME/.claude/statusline.sh"
+_cp_main --uninstall-statusline >/dev/null 2>&1
+eq "uninstall refuses unbalanced markers" "$?" "1"
+check "unbalanced file left untouched" 'grep -q "unterminated block content" "$FAKEHOME/.claude/statusline.sh"'
+printf '%s\n' "$_slorig" > "$FAKEHOME/.claude/statusline.sh"
+
+_cp_main --install-statusline >/dev/null
+check "statusline backed up"  '[ -f "$FAKEHOME/.claude/statusline.sh.bak" ]'
+check "block installed"       'grep -q "CLAUDE_PROFILE_BLOCK start" "$FAKEHOME/.claude/statusline.sh"'
+check "original preserved"    'grep -q "printf hud" "$FAKEHOME/.claude/statusline.sh"'
+
+_cp_main --install-statusline >/dev/null
+eq "install is idempotent" \
+   "$(grep -c 'CLAUDE_PROFILE_BLOCK start' "$FAKEHOME/.claude/statusline.sh")" "1"
+
+out=$(CLAUDE_CONFIG_DIR="$TMP/store/profiles/dev" sh "$FAKEHOME/.claude/statusline.sh")
+check "statusline shows profile" 'printf "%s" "$out" | grep -q "\[dev\]"'
+
+out=$(sh "$FAKEHOME/.claude/statusline.sh")
+check "statusline silent without profile" '! printf "%s" "$out" | grep -q "\["'
+
+_cp_main --uninstall-statusline >/dev/null
+check "block removed"      '! grep -q "CLAUDE_PROFILE_BLOCK" "$FAKEHOME/.claude/statusline.sh"'
+check "original still there" 'grep -q "printf hud" "$FAKEHOME/.claude/statusline.sh"'
+
+# A profile created after install inherits the block through the normal copy.
+_cp_main --install-statusline >/dev/null
+_cp_main --create sl >/dev/null
+check "new profile inherits block" 'grep -q "CLAUDE_PROFILE_BLOCK" "$TMP/store/profiles/sl/statusline.sh"'
+_CP_YES=1 _cp_main --delete sl >/dev/null
+_cp_main --uninstall-statusline >/dev/null
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
