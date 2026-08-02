@@ -28,13 +28,19 @@ cat > "$FAKEHOME/.claude/settings.json" <<JSON
   "statusLine": { "type": "command", "command": "$FAKEHOME/.claude/statusline.sh" },
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "$FAKEHOME/.claude/hooks/demo.sh" } ] }
+      { "hooks": [
+          { "type": "command", "command": "$FAKEHOME/.claude/hooks/demo.sh" },
+          { "type": "command", "command": "$FAKEHOME/.claude/hooks/demo.sh" }
+        ] }
     ]
   },
   "env": { "TOOL": "$FAKEHOME/.local/bin/tool" }
 }
 JSON
 printf 'printf hud\n' > "$FAKEHOME/.claude/statusline.sh"
+cat > "$FAKEHOME/.claude/.claude.json" <<JSON
+{ "mcpServers": { "figma": {}, "atlassian": {} } }
+JSON
 
 HOME="$FAKEHOME"
 export HOME
@@ -325,7 +331,8 @@ check "show reports model"          'printf "%s" "$out" | grep -q "model .*opus-
 check "show lists enabled plugin"   'printf "%s" "$out" | grep -q "alpha@m"'
 check "show omits disabled plugin"  '! printf "%s" "$out" | grep -q "beta@m"'
 check "show lists skills"           'printf "%s" "$out" | grep -q "demo"'
-check "show counts hooks"           'printf "%s" "$out" | grep -q "hooks .*1"'
+check "show counts hooks"           'printf "%s" "$out" | grep -q "hooks .*2"'
+check "show lists mcp servers"      'printf "%s" "$out" | grep -q "figma" && printf "%s" "$out" | grep -q "atlassian"'
 
 python3 - "$TMP/store/profiles/fin/settings.json" <<'PY'
 import json, sys

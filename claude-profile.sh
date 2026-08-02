@@ -320,7 +320,11 @@ def load(p):
 s = load(os.path.join(d, "settings.json"))
 
 plugins = sorted(k for k, v in (s.get("enabledPlugins") or {}).items() if v)
-hooks = sum(len(v) for v in (s.get("hooks") or {}).values())
+hooks = sum(
+    len(b.get("hooks") or []) if isinstance(b, dict) else 0
+    for v in (s.get("hooks") or {}).values() if isinstance(v, list)
+    for b in v
+)
 
 skills_dir = os.path.join(d, "skills")
 skills = sorted(
