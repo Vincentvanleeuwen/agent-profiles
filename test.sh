@@ -161,7 +161,11 @@ check "refused set left active alone" '[ ! -f "$TMP/store/active" ]'
 check "status lists profiles" '_cp_main | grep -q dev'
 _cp_main dev >/dev/null
 check "status names active"   '_cp_main | grep -q "active: dev"'
-check "status names source"   '_cp_main | grep -q "active"'
+# Regression: _cp_cmd_status read $_CP_SRC after $(_cp_selected), a subshell —
+# the assignment inside never reached the caller, so this used to pass only
+# because the literal word "active:" is always in the format string, not
+# because the source was actually reported. Assert the parenthesised value.
+check "status names source"   '_cp_main | grep -q "(active)"'
 
 # _cp_valid_name rejection paths reach _cp_cmd_create unfiltered: _cp_main only
 # inspects $1, and --create) shift; _cp_cmd_create "$@" passes the next arg
@@ -353,20 +357,27 @@ eq "show refuses unknown profile" "$?" "1"
 
 echo "== Task 8: export and import =="
 
-_cp_main --export dev "$TMP/dev.tar.gz" >/dev/null
+_experr=$(_cp_main --export dev "$TMP/dev.tar.gz" 2>&1 >/dev/null)
 check "export wrote archive" '[ -s "$TMP/dev.tar.gz" ]'
 check "archive has settings" 'tar tzf "$TMP/dev.tar.gz" | grep -q "settings.json"'
 check "archive has skills"   'tar tzf "$TMP/dev.tar.gz" | grep -q "skills/demo"'
 check "archive omits credentials" '! tar tzf "$TMP/dev.tar.gz" | grep -q "credentials"'
 check "archive omits plugins"     '! tar tzf "$TMP/dev.tar.gz" | grep -q "^plugins"'
 check "archive omits projects"    '! tar tzf "$TMP/dev.tar.gz" | grep -q "^projects"'
+# dev's settings.json carries a top-level "env" block (see fake home setup).
+check "export warns about env block" 'printf "%s" "$_experr" | grep -q "env"'
+check "export manifest lists a known entry" 'printf "%s" "$_experr" | grep -q "settings.json"'
 
-_cp_main --import "$TMP/dev.tar.gz" imported >/dev/null
+_impout=$(_cp_main --import "$TMP/dev.tar.gz" imported)
 check "import created profile"    '[ -d "$TMP/store/profiles/imported" ]'
 check "import relinked plugins"   '[ -L "$TMP/store/profiles/imported/plugins" ]'
 check "import relinked creds"     '[ -L "$TMP/store/profiles/imported/.credentials.json" ]'
 check "import rewrote paths"      'grep -q "$TMP/store/profiles/imported/hooks/demo.sh" "$TMP/store/profiles/imported/settings.json"'
 check "import left no dev paths"  '! grep -q "profiles/dev/" "$TMP/store/profiles/imported/settings.json"'
+# Regression: _cp_rewrite used to assign its own _f, clobbering the caller's
+# _f (the archive path) in _cp_cmd_import — the message named settings.json
+# instead of the tarball.
+eq "import message names archive, not settings.json" "$_impout" "imported imported <- $TMP/dev.tar.gz"
 
 _cp_main --import "$TMP/dev.tar.gz" imported >/dev/null 2>&1
 eq "import refuses existing name" "$?" "1"

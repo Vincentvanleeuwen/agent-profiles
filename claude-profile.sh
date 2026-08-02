@@ -88,23 +88,23 @@ _cp_is_skipped(){ case "$_CP_SKIP"   in *" $1 "*) return 0 ;; *) return 1 ;; esa
 # not the base config dir, also rewrites SOURCE_DIR/ -> PROFILE_DIR/, which is
 # what makes a profile forked from another profile point at itself.
 _cp_rewrite() {
-    _f="$1"; _p="$2"; _rsrc="${3:-}"
-    [ -f "$_f" ] || return 0
-    _t="$_f.tmp.$$"
+    _rf="$1"; _p="$2"; _rsrc="${3:-}"
+    [ -f "$_rf" ] || return 0
+    _t="$_rf.tmp.$$"
     if ! sed -e "s#$HOME/\.claude/#$_p/#g" \
              -e "s#\$HOME/\.claude/#$_p/#g" \
              -e "s#~/\.claude/#$_p/#g" \
-             "$_f" > "$_t"; then
+             "$_rf" > "$_t"; then
         rm -f "$_t"
         return 1
     fi
-    mv "$_t" "$_f" || { rm -f "$_t"; return 1; }
+    mv "$_t" "$_rf" || { rm -f "$_t"; return 1; }
     if [ -n "$_rsrc" ]; then
-        if ! sed -e "s#$_rsrc/#$_p/#g" "$_f" > "$_t"; then
+        if ! sed -e "s#$_rsrc/#$_p/#g" "$_rf" > "$_t"; then
             rm -f "$_t"
             return 1
         fi
-        mv "$_t" "$_f" || { rm -f "$_t"; return 1; }
+        mv "$_t" "$_rf" || { rm -f "$_t"; return 1; }
     fi
     return 0
 }
@@ -182,6 +182,10 @@ _cp_cmd_default() {
 
 _cp_cmd_status() {
     _sel=$(_cp_selected)
+    # $(...) is a subshell: _CP_SRC set inside _cp_selected above never reached
+    # here. Re-run it directly (stdout discarded, already captured in _sel) so
+    # _CP_SRC lands in this shell.
+    _cp_selected >/dev/null
     if [ -z "$_sel" ]; then
         printf 'active: none (using ~/.claude)\n'
     else
@@ -381,6 +385,11 @@ _cp_cmd_export() {
     fi
     _tmplist=$(mktemp)
     _cp_owned "$_d" > "$_tmplist"
+    if [ -f "$_d/settings.json" ] && python3 -c 'import json,sys; sys.exit(0 if "env" in json.load(open(sys.argv[1])) else 1)' "$_d/settings.json" 2>/dev/null; then
+        printf 'claude-profile: warning: "%s" settings.json has an "env" block; the archive will contain it\n' "$_n" >&2
+    fi
+    printf 'claude-profile: archiving:\n' >&2
+    sed 's/^/  /' "$_tmplist" >&2
     ( cd "$_d" && tar czf - -T "$_tmplist" ) > "$_out"
     _rc=$?
     if [ "$_rc" -ne 0 ]; then
@@ -405,6 +414,9 @@ _cp_cmd_import() {
     _cp_exists "$_n" && { printf 'claude-profile: "%s" already exists\n' "$_n" >&2; return 1; }
     _d=$(_cp_dir "$_n")
     mkdir -p "$_d" || return 1
+    # No explicit check here against "../" or absolute members in the archive:
+    # containment relies on the tar binary's own behaviour (bsdtar and modern
+    # GNU tar refuse to escape -C; unverified on older tar implementations).
     tar xzf "$_f" -C "$_d" || { rm -rf "$_d"; return 1; }
     # Relink every shared path that exists in base.
     for _b in $_CP_SHARED; do
