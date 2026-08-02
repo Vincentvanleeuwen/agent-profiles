@@ -77,5 +77,37 @@ eq "no active resolves to base" "$(_cp_resolve)" "$FAKEHOME/.claude"
 _cp_selected >/dev/null
 eq "no active has source none" "$_CP_SRC" "none"
 
+echo "== Task 2: build =="
+
+_cp_build "$FAKEHOME/.claude" "$TMP/store/profiles/built"
+B="$TMP/store/profiles/built"
+
+check "settings.json is a real file"   '[ -f "$B/settings.json" ] && [ ! -L "$B/settings.json" ]'
+check "skills copied as real dir"      '[ -d "$B/skills/demo" ] && [ ! -L "$B/skills" ]'
+check "CLAUDE.md copied"               '[ -f "$B/CLAUDE.md" ]'
+check "hooks copied as real dir"       '[ -d "$B/hooks" ] && [ ! -L "$B/hooks" ]'
+check "plugins symlinked"              '[ -L "$B/plugins" ]'
+check "projects symlinked"             '[ -L "$B/projects" ]'
+check "credentials symlinked"          '[ -L "$B/.credentials.json" ]'
+check "history symlinked"              '[ -L "$B/history.jsonl" ]'
+eq    "symlink points at base"         "$(readlink "$B/plugins")" "$FAKEHOME/.claude/plugins"
+
+check "hook path rewritten to profile" 'grep -q "$B/hooks/demo.sh" "$B/settings.json"'
+check "statusline path rewritten"      'grep -q "$B/statusline.sh" "$B/settings.json"'
+check "no base config paths remain"    '! grep -q "$FAKEHOME/.claude/" "$B/settings.json"'
+check "non-config abs path preserved"  'grep -q "$FAKEHOME/.local/bin/tool" "$B/settings.json"'
+check "settings.json still valid json" 'python3 -c "import json,sys;json.load(open(sys.argv[1]))" "$B/settings.json"'
+
+printf 'x\n' > "$FAKEHOME/.claude/.DS_Store"
+_cp_build "$FAKEHOME/.claude" "$TMP/store/profiles/built2"
+check "DS_Store skipped" '[ ! -e "$TMP/store/profiles/built2/.DS_Store" ]'
+
+# Building from a profile must still link shared paths to base, not chain.
+_cp_build "$B" "$TMP/store/profiles/forked"
+eq "fork links to base not source" \
+   "$(readlink "$TMP/store/profiles/forked/plugins")" "$FAKEHOME/.claude/plugins"
+check "fork rewrote paths to itself" \
+   'grep -q "$TMP/store/profiles/forked/hooks/demo.sh" "$TMP/store/profiles/forked/settings.json"'
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
