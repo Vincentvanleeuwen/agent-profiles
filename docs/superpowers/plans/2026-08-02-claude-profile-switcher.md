@@ -252,7 +252,7 @@ git commit -m "feat: profile resolution order and test harness"
 - Consumes: `_cp_store()` from Task 1.
 - Produces:
   - `_CP_SHARED` — space-delimited shared list, leading and trailing space included for `case` matching
-  - `_cp_rewrite SETTINGS_FILE PROFILE_DIR` → rewrites `~/.claude/` prefixes in place
+  - `_cp_rewrite SETTINGS_FILE PROFILE_DIR [SOURCE_DIR]` → rewrites `~/.claude/` prefixes in place; when SOURCE_DIR is given and differs from the base config dir, also rewrites `SOURCE_DIR/` → `PROFILE_DIR/`, which is what makes a profile forked from another profile point at itself. SOURCE_DIR is an explicit parameter, never a global read from the caller.
   - `_cp_build SRC_DIR DEST_DIR` → populates DEST_DIR as a profile
 
 - [ ] **Step 1: Write the failing test**
@@ -798,9 +798,9 @@ _cp_cmd_rename() {
     _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
     _cp_exists "$_n" && { printf 'claude-profile: "%s" already exists\n' "$_n" >&2; return 1; }
     mv "$(_cp_dir "$_o")" "$(_cp_dir "$_n")"
-    _cp_rewrite "$(_cp_dir "$_n")/settings.json" "$(_cp_dir "$_n")"
-    sed -i.bak -e "s#$(_cp_dir "$_o")#$(_cp_dir "$_n")#g" "$(_cp_dir "$_n")/settings.json" \
-        && rm -f "$(_cp_dir "$_n")/settings.json.bak"
+    # Third argument is the OLD profile dir: after the mv, settings.json still
+    # carries the old profile's paths, and that pass is what retargets them.
+    _cp_rewrite "$(_cp_dir "$_n")/settings.json" "$(_cp_dir "$_n")" "$(_cp_dir "$_o")"
     if [ "$(_cp_read_name "$(_cp_store)/active" 2>/dev/null)" = "$_o" ]; then
         printf '%s\n' "$_n" > "$(_cp_store)/active"
     fi
@@ -825,7 +825,7 @@ Add to the `case` in `_cp_main`:
         --copy)             shift; _cp_cmd_copy "$@" ;;
 ```
 
-Note on `_cp_cmd_rename`: `_cp_rewrite` only matches `~/.claude/` prefixes, so after a `mv` the settings still carry the *old profile* path. The extra `sed` line rewrites old-profile → new-profile. `_cp_cmd_copy` reuses `_cp_build`, which rebuilds from scratch and therefore needs no such fixup.
+Note on `_cp_cmd_rename`: `_cp_rewrite`'s first two passes only match `~/.claude/` prefixes, so after a `mv` the settings still carry the *old profile* path. That is what the third argument is for — never call `_cp_rewrite` with two arguments here and rely on a leftover global. `_cp_cmd_copy` reuses `_cp_build`, which passes its own source through and therefore needs no fixup.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1082,6 +1082,8 @@ _cp_cmd_import() {
     if [ -f "$_d/settings.json" ]; then
         _t="$_d/settings.json.tmp.$$"
         sed -e "s#[^\"]*/profiles/[^\"/]*/#$_d/#g" "$_d/settings.json" > "$_t" && mv "$_t" "$_d/settings.json"
+        # Two arguments only: the sed above already retargeted the exporting
+        # machine's profile paths, and there is no meaningful source dir here.
         _cp_rewrite "$_d/settings.json" "$_d"
     fi
     printf 'imported %s <- %s\n' "$_n" "$_f"
