@@ -1103,7 +1103,17 @@ def load(p):
 s = load(os.path.join(d, "settings.json"))
 
 plugins = sorted(k for k, v in (s.get("enabledPlugins") or {}).items() if v)
-hooks = sum(len(v) for v in (s.get("hooks") or {}).values())
+
+# settings.json nests hooks as: event -> [matcher-block, ...] -> block["hooks"].
+# Counting the matcher-blocks instead of the commands inside them undercounts
+# any block holding more than one hook.
+hooks = 0
+for _blocks in (s.get("hooks") or {}).values():
+    if not isinstance(_blocks, list):
+        continue
+    for _b in _blocks:
+        if isinstance(_b, dict):
+            hooks += len(_b.get("hooks") or [])
 
 skills_dir = os.path.join(d, "skills")
 skills = sorted(
