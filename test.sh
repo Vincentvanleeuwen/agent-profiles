@@ -510,5 +510,21 @@ check "status names the store path" '_cp_main | grep -q "^store: "'
 check "README exists"     '[ -f "$HERE/README.md" ]'
 check "README warns about profiles being ignored" 'grep -q "gitignore" "$HERE/README.md"'
 
+echo "== Task 11b: symlinked content =="
+
+mkdir -p "$TMP/external/extskill"
+printf 'name: ext\n' > "$TMP/external/extskill/SKILL.md"
+mkdir -p "$FAKEHOME/.claude/skills"
+( cd "$FAKEHOME/.claude/skills" && ln -s ../../../external/extskill relskill )
+_cp_main --create symp >/dev/null
+S="$TMP/store/profiles/symp/skills/relskill"
+check "symlinked skill resolves in profile" '[ -e "$S" ]'
+check "symlinked skill real content" '[ -f "$S/SKILL.md" ]'
+check "symlinked skill is not link" '[ ! -L "$S" ]'
+check "shared list still symlinked" '[ -L "$TMP/store/profiles/symp/plugins" ]'
+check "show lists symlinked skill" '_cp_main --show symp | grep -q relskill'
+_CP_YES=1 _cp_main --delete symp >/dev/null
+rm -rf "$FAKEHOME/.claude/skills/relskill" "$TMP/external"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

@@ -125,7 +125,10 @@ _cp_build() {
                 ln -s "$HOME/.claude/$_b" "$_dest/$_b" || return 1
             fi
         else
-            cp -R "$_e" "$_dest/$_b" || return 1
+            # -L dereferences: relative symlink copied as link would resolve
+            # against profile directory and dangle. A profile is a snapshot,
+            # so copy content by value.
+            cp -RL "$_e" "$_dest/$_b" || return 1
         fi
     done
     _cp_rewrite "$_dest/settings.json" "$_dest" "$_src" || return 1
