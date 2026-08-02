@@ -136,3 +136,7 @@ sh test.sh && bash test.sh
 
 Tests run against a temporary store and a temporary fake home. They never read
 or write your real `~/.claude`.
+
+Verified on Claude Code 2.1.220: `--create` against a real `~/.claude` (552K,
+symlinks resolved, `settings.json` rewritten), and
+`CLAUDE_CONFIG_DIR=.../profiles/smoke claude --version` loaded it cleanly.
