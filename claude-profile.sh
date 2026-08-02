@@ -198,11 +198,38 @@ _cp_cmd_run() {
     CLAUDE_CONFIG_DIR="$(_cp_dir "$_n")" _cp_run_claude "$@"
 }
 
+_cp_backup() {
+    _n="$1"
+    _stamp=$(date +%Y%m%d-%H%M%S)
+    _dst="$(_cp_store)/.backups/$_n-$_stamp"
+    mkdir -p "$(_cp_store)/.backups"
+    mv "$(_cp_dir "$_n")" "$_dst"
+    printf '%s' "$_dst"
+}
+
+_cp_cmd_update() {
+    _n="$1"
+    if ! _cp_exists "$_n"; then
+        printf 'claude-profile: no such profile "%s"\n' "$_n" >&2
+        return 1
+    fi
+    _from=$(_cp_resolve)
+    if [ "$_from" = "$(_cp_dir "$_n")" ]; then
+        printf 'claude-profile: "%s" is the active source; switch away first\n' "$_n" >&2
+        return 1
+    fi
+    _bk=$(_cp_backup "$_n")
+    _cp_build "$_from" "$(_cp_dir "$_n")"
+    printf 'backed up -> %s\n' "$_bk"
+    printf 'updated %s <- %s\n' "$_n" "$_from"
+}
+
 _cp_main() {
     case "${1:-}" in
         "")                 _cp_cmd_status ;;
         default|--reset)    _cp_cmd_default ;;
         --create)           shift; _cp_cmd_create "$@" ;;
+        --update)           shift; _cp_cmd_update "$@" ;;
         -h|--help)          _cp_cmd_status ;;
         -*)                 printf 'claude-profile: unknown option %s\n' "$1" >&2; return 1 ;;
         *)

@@ -209,5 +209,28 @@ out=$(_CP_RUNNER='_cp_test_runner' _cp_main ghost -- --version 2>&1)
 check "one-shot on unknown profile errors" 'printf "%s" "$out" | grep -q "no such profile"'
 unset _CP_RUNNER
 
+echo "== Task 5: update =="
+
+_cp_main default >/dev/null
+printf 'tuned by hand\n' > "$TMP/store/profiles/fin/LOCAL.md"
+rm -f "$TMP/store/profiles/fin/CLAUDE.md"
+
+_cp_main --update fin >/dev/null
+check "update restored file from source" '[ -f "$TMP/store/profiles/fin/CLAUDE.md" ]'
+check "update removed profile-only file" '[ ! -f "$TMP/store/profiles/fin/LOCAL.md" ]'
+check "update made a backup"             'ls -d "$TMP/store/.backups/fin-"* >/dev/null 2>&1'
+check "backup kept the removed file"     'cat "$TMP/store/.backups/fin-"*/LOCAL.md >/dev/null 2>&1'
+check "update relinked shared paths"     '[ -L "$TMP/store/profiles/fin/plugins" ]'
+check "update rewrote settings paths"    'grep -q "$TMP/store/profiles/fin/hooks/demo.sh" "$TMP/store/profiles/fin/settings.json"'
+
+_cp_main --update ghost >/dev/null 2>&1
+eq "update refuses unknown profile" "$?" "1"
+
+_cp_main fin >/dev/null
+_cp_main --update fin >/dev/null 2>&1
+eq "update refuses self as source" "$?" "1"
+check "self-update left profile intact" '[ -f "$TMP/store/profiles/fin/settings.json" ]'
+_cp_main default >/dev/null
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
