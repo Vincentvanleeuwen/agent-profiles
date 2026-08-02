@@ -525,28 +525,31 @@ git commit -m "feat: create, activate and list profiles"
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `test.sh` before the summary block:
+First add this stub to `test.sh`, on the line immediately after `. "$HERE/claude-profile.sh"`:
+
+```sh
+_cp_test_runner() { printf 'CFG=%s ARGS=%s\n' "$CLAUDE_CONFIG_DIR" "$*"; }
+```
+
+Then append to `test.sh` before the summary block:
 
 ```sh
 echo "== Task 4: one-shot run =="
 
 _cp_main dev >/dev/null
-_CP_RUNNER="printf CFG=%s\n \"\$CLAUDE_CONFIG_DIR\" #"
+
 out=$(_CP_RUNNER='_cp_test_runner' _cp_main fin -- --version 2>&1)
 eq "one-shot used fin dir" "$out" "CFG=$TMP/store/profiles/fin ARGS=--version"
 eq "active unchanged after one-shot" "$(cat "$TMP/store/active")" "dev"
 
 out=$(_CP_RUNNER='_cp_test_runner' _cp_main ghost -- --version 2>&1)
 check "one-shot on unknown profile errors" 'printf "%s" "$out" | grep -q "no such profile"'
+unset _CP_RUNNER
 ```
 
-Also add this stub near the top of `test.sh`, just after the `. "$HERE/claude-profile.sh"` line:
-
-```sh
-_cp_test_runner() { printf 'CFG=%s ARGS=%s\n' "$CLAUDE_CONFIG_DIR" "$*"; }
-```
-
-And delete the placeholder `_CP_RUNNER="printf CFG=..."` line above — it exists only to be replaced; the real assertion uses `_cp_test_runner`.
+The trailing `unset` matters: in POSIX sh, a variable assignment prefixing a
+*function* call may persist after the call returns, so leaving it set would leak
+the stub into later tasks' assertions.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1042,7 +1045,6 @@ _cp_cmd_export() {
         printf 'claude-profile: refusing to export "%s": .credentials.json is a real file\n' "$_n" >&2
         return 1
     fi
-    _list="$TMP_UNUSED"
     _tmplist=$(mktemp)
     _cp_owned "$_d" > "$_tmplist"
     ( cd "$_d" && tar czf - -T "$_tmplist" ) > "$_out"
@@ -1081,8 +1083,6 @@ _cp_cmd_import() {
     printf 'imported %s <- %s\n' "$_n" "$_f"
 }
 ```
-
-Remove the stray `_list="$TMP_UNUSED"` line — it is not used; it is listed here only so the implementer notices and deletes it if pasted verbatim.
 
 Add to the `case` in `_cp_main`:
 
@@ -1477,10 +1477,8 @@ git commit -m "docs: record smoke test against real config"
 
 No gaps.
 
-**Placeholder scan:** Two deliberate call-outs, both flagged inline for deletion
-rather than left as silent debt — the throwaway `_CP_RUNNER` line in Task 4 Step 1
-and the `_list="$TMP_UNUSED"` line in Task 8 Step 3. Every other step carries
-real code.
+**Placeholder scan:** Clean. Every step carries the real code to write, and no
+step instructs the implementer to write something and then remove it.
 
 **Type consistency:** `_cp_dir`, `_cp_exists`, `_cp_valid_name`, `_cp_build`,
 `_cp_rewrite`, `_cp_backup`, `_cp_is_shared`, `_cp_is_skipped`, `_cp_selected`,
