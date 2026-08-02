@@ -1747,6 +1747,86 @@ git commit -m "docs: record smoke test against real config"
 
 ---
 
+### Task 11b: Copy symlinked content by value, not by link
+
+Found by the Task 11 smoke test against real config — the reason that task exists.
+
+`~/.claude/skills/grill-me` is a relative symlink to `../../.agents/skills/grill-me`.
+`cp -R` preserves the link, so inside a profile it resolves to
+`<store>/profiles/.agents/skills/grill-me`, which does not exist. Verified: the
+entry in a freshly created profile is dangling, so the skill is silently absent
+from every profile. `--show` omitting it was the visible symptom; the skill being
+gone is the actual bug.
+
+Any relative symlink anywhere in copied content has this problem. Absolute
+symlinks survive by luck, and pointing a profile back at base would be wrong
+anyway — a profile is a snapshot, and the whole point is that it can diverge.
+
+**Files:**
+- Modify: `claude-profile.sh` (`_cp_build`)
+- Modify: `test.sh`
+
+**Interfaces:**
+- Consumes: everything from Task 2 and 5b.
+- Produces: no signature change. Copied entries are dereferenced; the shared list is still symlinked.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `test.sh` before the summary block:
+
+```sh
+echo "== Task 11b: symlinked content =="
+
+mkdir -p "$TMP/external/extskill"
+printf 'name: ext\n' > "$TMP/external/extskill/SKILL.md"
+mkdir -p "$FAKEHOME/.claude/skills"
+( cd "$FAKEHOME/.claude/skills" && ln -s ../../../external/extskill relskill )
+
+_cp_main --create symp >/dev/null
+S="$TMP/store/profiles/symp/skills/relskill"
+
+check "symlinked skill resolves in profile" '[ -e "$S" ]'
+check "symlinked skill is real content"     '[ -f "$S/SKILL.md" ]'
+check "symlinked skill is not a link"       '[ ! -L "$S" ]'
+check "shared list still symlinked"         '[ -L "$TMP/store/profiles/symp/plugins" ]'
+check "show lists the symlinked skill"      '_cp_main --show symp | grep -q relskill'
+
+_CP_YES=1 _cp_main --delete symp >/dev/null
+rm -rf "$FAKEHOME/.claude/skills/relskill" "$TMP/external"
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `sh test.sh`
+Expected: FAIL on `symlinked skill resolves in profile` — the copied entry is a dangling link.
+
+- [ ] **Step 3: Write minimal implementation**
+
+In `_cp_build`, dereference when copying. Only the `cp` changes:
+
+```sh
+            # -L dereferences: a relative symlink copied as a link would resolve
+            # against the profile directory and dangle. A profile is a snapshot,
+            # so copy the content by value.
+            cp -RL "$_e" "$_dest/$_b" || return 1
+```
+
+The shared-list branch is untouched — those stay symlinks to base on purpose.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `sh test.sh` then `bash test.sh`
+Expected: both `all passed`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add claude-profile.sh test.sh
+git commit -m "fix: dereference symlinks when copying profile content"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:**
