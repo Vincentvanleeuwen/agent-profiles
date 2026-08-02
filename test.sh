@@ -195,6 +195,18 @@ else
     eq "default fails loudly on unwritable store" "$?" "1"
     eq "default left previous active intact" "$(cat "$TMP/store/active")" "dev"
     chmod 755 "$TMP/store"
+
+    # A failed backup must abort before _cp_build ever touches the profile —
+    # the backup is the only rollback this tool has, so a false "backed up"
+    # immediately preceding an overwrite is the worst lie it can tell.
+    mkdir -p "$TMP/store/.backups"
+    chmod 555 "$TMP/store/.backups"
+    _cp_main dev >/dev/null
+    out=$(_cp_main --update fin 2>&1)
+    eq "update fails loudly on unwritable backups dir" "$?" "1"
+    check "update backup failure errors on stderr" 'printf "%s" "$out" | grep -q "backup failed"'
+    check "failed backup left profile untouched" '[ -f "$TMP/store/profiles/fin/CLAUDE.md" ]'
+    chmod 755 "$TMP/store/.backups"
 fi
 
 echo "== Task 4: one-shot run =="
