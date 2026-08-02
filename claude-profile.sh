@@ -359,6 +359,77 @@ _cp_cmd_diff() {
     _cp_summary "$(_cp_dir "$_b")"
 }
 
+_cp_owned() {
+    _d="$1"
+    for _e in "$_d"/* "$_d"/.[!.]*; do
+        [ -e "$_e" ] || continue
+        _b="${_e##*/}"
+        _cp_is_shared "$_b" && continue
+        _cp_is_skipped "$_b" && continue
+        printf '%s\n' "$_b"
+    done
+}
+
+_cp_cmd_export() {
+    _n="$1"
+    _cp_exists "$_n" || { printf 'claude-profile: no such profile "%s"\n' "$_n" >&2; return 1; }
+    _out="${2:-./$_n.tar.gz}"
+    _d=$(_cp_dir "$_n")
+    if [ -e "$_d/.credentials.json" ] && [ ! -L "$_d/.credentials.json" ]; then
+        printf 'claude-profile: refusing to export "%s": .credentials.json is a real file\n' "$_n" >&2
+        return 1
+    fi
+    _tmplist=$(mktemp)
+    _cp_owned "$_d" > "$_tmplist"
+    ( cd "$_d" && tar czf - -T "$_tmplist" ) > "$_out"
+    _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        rm -f "$_tmplist" "$_out"
+        printf 'claude-profile: failed to write archive "%s"\n' "$_out" >&2
+        return 1
+    fi
+    rm -f "$_tmplist"
+    printf 'exported %s -> %s\n' "$_n" "$_out"
+}
+
+_cp_cmd_import() {
+    _f="$1"
+    [ -f "$_f" ] || { printf 'claude-profile: no such file "%s"\n' "$_f" >&2; return 1; }
+    _n="${2:-}"
+    if [ -z "$_n" ]; then
+        _n=$(basename "$_f")
+        _n="${_n%.tar.gz}"
+        _n="${_n%.tgz}"
+    fi
+    _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
+    _cp_exists "$_n" && { printf 'claude-profile: "%s" already exists\n' "$_n" >&2; return 1; }
+    _d=$(_cp_dir "$_n")
+    mkdir -p "$_d" || return 1
+    tar xzf "$_f" -C "$_d" || { rm -rf "$_d"; return 1; }
+    # Relink every shared path that exists in base.
+    for _b in $_CP_SHARED; do
+        [ -e "$HOME/.claude/$_b" ] || continue
+        rm -rf "$_d/$_b" || { rm -rf "$_d"; return 1; }
+        ln -s "$HOME/.claude/$_b" "$_d/$_b" || { rm -rf "$_d"; return 1; }
+    done
+    # The archive carries the exporting machine's profile paths. Rewrite any
+    # absolute path ending in /profiles/<something>/ to this profile, then the
+    # ~/.claude/ prefixes as usual.
+    if [ -f "$_d/settings.json" ]; then
+        _t="$_d/settings.json.tmp.$$"
+        if ! sed -e "s#[^\"]*/profiles/[^\"/]*/#$_d/#g" "$_d/settings.json" > "$_t"; then
+            rm -f "$_t"
+            rm -rf "$_d"
+            return 1
+        fi
+        mv "$_t" "$_d/settings.json" || { rm -f "$_t"; rm -rf "$_d"; return 1; }
+        # Two arguments only: the sed above already retargeted the exporting
+        # machine's profile paths, and there is no meaningful source dir here.
+        _cp_rewrite "$_d/settings.json" "$_d" || { rm -rf "$_d"; return 1; }
+    fi
+    printf 'imported %s <- %s\n' "$_n" "$_f"
+}
+
 _cp_main() {
     case "${1:-}" in
         "")                 _cp_cmd_status ;;
@@ -370,6 +441,8 @@ _cp_main() {
         --copy)             shift; _cp_cmd_copy "$@" ;;
         --show)             shift; _cp_cmd_show "$@" ;;
         --diff)             shift; _cp_cmd_diff "$@" ;;
+        --export)           shift; _cp_cmd_export "$@" ;;
+        --import)           shift; _cp_cmd_import "$@" ;;
         -h|--help)          _cp_cmd_status ;;
         -*)                 printf 'claude-profile: unknown option %s\n' "$1" >&2; return 1 ;;
         *)

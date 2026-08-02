@@ -351,5 +351,35 @@ check "diff shows plugin delta" 'printf "%s" "$out" | grep -q "alpha@m"'
 _cp_main --show ghost >/dev/null 2>&1
 eq "show refuses unknown profile" "$?" "1"
 
+echo "== Task 8: export and import =="
+
+_cp_main --export dev "$TMP/dev.tar.gz" >/dev/null
+check "export wrote archive" '[ -s "$TMP/dev.tar.gz" ]'
+check "archive has settings" 'tar tzf "$TMP/dev.tar.gz" | grep -q "settings.json"'
+check "archive has skills"   'tar tzf "$TMP/dev.tar.gz" | grep -q "skills/demo"'
+check "archive omits credentials" '! tar tzf "$TMP/dev.tar.gz" | grep -q "credentials"'
+check "archive omits plugins"     '! tar tzf "$TMP/dev.tar.gz" | grep -q "^plugins"'
+check "archive omits projects"    '! tar tzf "$TMP/dev.tar.gz" | grep -q "^projects"'
+
+_cp_main --import "$TMP/dev.tar.gz" imported >/dev/null
+check "import created profile"    '[ -d "$TMP/store/profiles/imported" ]'
+check "import relinked plugins"   '[ -L "$TMP/store/profiles/imported/plugins" ]'
+check "import relinked creds"     '[ -L "$TMP/store/profiles/imported/.credentials.json" ]'
+check "import rewrote paths"      'grep -q "$TMP/store/profiles/imported/hooks/demo.sh" "$TMP/store/profiles/imported/settings.json"'
+check "import left no dev paths"  '! grep -q "profiles/dev/" "$TMP/store/profiles/imported/settings.json"'
+
+_cp_main --import "$TMP/dev.tar.gz" imported >/dev/null 2>&1
+eq "import refuses existing name" "$?" "1"
+
+# A profile carrying a real credentials file must never be exported.
+_cp_main --create leaky >/dev/null
+rm -f "$TMP/store/profiles/leaky/.credentials.json"
+printf 'token\n' > "$TMP/store/profiles/leaky/.credentials.json"
+_cp_main --export leaky "$TMP/leaky.tar.gz" >/dev/null 2>&1
+eq "export refuses real credentials file" "$?" "1"
+check "no archive written" '[ ! -e "$TMP/leaky.tar.gz" ]'
+_CP_YES=1 _cp_main --delete leaky >/dev/null
+_CP_YES=1 _cp_main --delete imported >/dev/null
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
