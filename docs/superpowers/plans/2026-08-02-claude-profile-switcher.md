@@ -122,9 +122,13 @@ eq "resolve returns profile dir" "$(_cp_resolve)" "$TMP/store/profiles/dev"
 mkdir -p "$TMP/repo/nested/deep"
 printf 'fin  # inline comment\n' > "$TMP/repo/.claude-profile"
 mkdir -p "$TMP/store/profiles/fin"
-( cd "$TMP/repo/nested/deep" && eq "pin beats active" "$(_cp_selected)" "fin" )
-( cd "$TMP/repo/nested/deep" && CLAUDE_PROFILE=other _cp_selected >/dev/null
-  eq "env beats pin" "$(cd "$TMP/repo" && CLAUDE_PROFILE=other _cp_selected)" "other" )
+# Never call eq inside ( ... ): the subshell discards the fails counter, so a
+# broken assertion prints FAIL and the suite still exits 0. Capture in the
+# subshell, assert outside it.
+got=$(cd "$TMP/repo/nested/deep" && _cp_selected)
+eq "pin beats active" "$got" "fin"
+got=$(cd "$TMP/repo/nested/deep" && CLAUDE_PROFILE=other _cp_selected)
+eq "env beats pin" "$got" "other"
 
 printf 'ghost\n' > "$TMP/store/active"
 eq "unknown profile falls back to base" "$(_cp_resolve 2>/dev/null)" "$FAKEHOME/.claude"
