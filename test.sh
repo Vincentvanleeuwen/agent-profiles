@@ -156,5 +156,24 @@ _cp_main dev >/dev/null
 check "status names active"   '_cp_main | grep -q "active: dev"'
 check "status names source"   '_cp_main | grep -q "active"'
 
+# _cp_valid_name rejection paths reach _cp_cmd_create unfiltered: _cp_main only
+# inspects $1, and --create) shift; _cp_cmd_create "$@" passes the next arg
+# through untouched. Confirm each rejected name is both a non-zero exit and
+# leaves the profile set exactly as it was (count, not just one guessed path).
+before=$(find "$TMP/store/profiles" -maxdepth 1 -type d | wc -l)
+
+_cp_main --create -foo >/dev/null 2>&1
+eq "create rejects leading-dash name" "$?" "1"
+eq "leading-dash name made no dir" "$(find "$TMP/store/profiles" -maxdepth 1 -type d | wc -l)" "$before"
+
+_cp_main --create ../../evil >/dev/null 2>&1
+eq "create rejects path traversal" "$?" "1"
+check "path traversal escaped nowhere" '[ ! -e "$TMP/evil" ] && [ ! -e "$HOME/evil" ]'
+eq "path traversal made no dir" "$(find "$TMP/store/profiles" -maxdepth 1 -type d | wc -l)" "$before"
+
+_cp_main --create "" >/dev/null 2>&1
+eq "create rejects empty name" "$?" "1"
+eq "empty name made no dir" "$(find "$TMP/store/profiles" -maxdepth 1 -type d | wc -l)" "$before"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

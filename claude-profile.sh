@@ -147,12 +147,19 @@ _cp_cmd_set() {
         printf 'claude-profile: no such profile "%s"\n' "$_n" >&2
         return 1
     fi
-    printf '%s\n' "$_n" > "$(_cp_store)/active"
+    if ! printf '%s\n' "$_n" > "$(_cp_store)/active"; then
+        printf 'claude-profile: could not write %s/active\n' "$(_cp_store)" >&2
+        return 1
+    fi
     printf 'active profile: %s\n' "$_n"
 }
 
 _cp_cmd_default() {
-    rm -f "$(_cp_store)/active"
+    rm -f "$(_cp_store)/active" 2>/dev/null
+    if [ -f "$(_cp_store)/active" ]; then
+        printf 'claude-profile: could not remove %s/active\n' "$(_cp_store)" >&2
+        return 1
+    fi
     printf 'active profile: none (using ~/.claude)\n'
 }
 
