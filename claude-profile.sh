@@ -517,6 +517,33 @@ _cp_cmd_uninstall_statusline() {
     printf 'statusline block removed\n'
 }
 
+_cp_cmd_help() {
+    cat <<'EOF'
+claude profile                       show active profile and list all
+claude profile <name>                set the active profile
+claude profile default               clear the active profile (alias: --reset)
+claude profile <name> -- <args>      run one session in <name>, active unchanged
+
+claude profile --create <name>       snapshot the current setup into a new profile
+claude profile --update <name>       mirror the current setup into an existing profile
+claude profile --delete <name>       delete a profile (backed up first)
+claude profile --rename <a> <b>      rename a profile
+claude profile --copy <a> <b>        duplicate a profile
+
+claude profile --show <name>         model, plugins, skills, hooks, mcp servers
+claude profile --diff <a> <b>        the same, for two profiles
+
+claude profile --export <name> [f]   write a shareable tarball (no credentials)
+claude profile --import <file> [n]   create a profile from a tarball
+
+claude profile --install-statusline    show the active profile in your statusline
+claude profile --uninstall-statusline  remove it
+
+Resolution order: $CLAUDE_PROFILE, then .claude-profile walking up from the
+current directory, then the active profile, then ~/.claude.
+EOF
+}
+
 _cp_main() {
     case "${1:-}" in
         "")                 _cp_cmd_status ;;
@@ -532,7 +559,7 @@ _cp_main() {
         --import)           shift; _cp_cmd_import "$@" ;;
         --install-statusline)   _cp_cmd_install_statusline ;;
         --uninstall-statusline) _cp_cmd_uninstall_statusline ;;
-        -h|--help)          _cp_cmd_status ;;
+        -h|--help)          _cp_cmd_help ;;
         -*)                 printf 'claude-profile: unknown option %s\n' "$1" >&2; return 1 ;;
         *)
             _n="$1"; shift

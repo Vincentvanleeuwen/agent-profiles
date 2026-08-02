@@ -492,5 +492,22 @@ check "first backup holds gen1"  'grep -q gen1 "$bk1/GEN.md"'
 check "second backup holds gen2" 'grep -q gen2 "$bk2/GEN.md"'
 check "no nesting inside first backup" '[ ! -d "$bk1/colla" ]'
 
+echo "== Task 10: portability and help =="
+
+check "sourceable under dash if present" \
+  '{ command -v dash >/dev/null 2>&1 && dash -n "$HERE/claude-profile.sh"; } || true'
+check "parses under bash"  'bash -n "$HERE/claude-profile.sh"'
+check "parses under zsh"   '{ command -v zsh >/dev/null 2>&1 && zsh -n "$HERE/claude-profile.sh"; } || true'
+# Excludes POSIX character classes like [[:space:]] ("[[" followed by ":"),
+# which are legitimate sh and not the bash [[ ]] test bashism.
+check "no bashisms: no [[" '! grep -qE "\[\[[^:]" "$HERE/claude-profile.sh"'
+check "no bashisms: no arrays" '! grep -qE "^[[:space:]]*[A-Za-z_]+=\(" "$HERE/claude-profile.sh"'
+check "no hardcoded home"  '! grep -q "/Users/" "$HERE/claude-profile.sh"'
+
+check "help lists create" '_cp_main --help | grep -q -- "--create"'
+check "help lists export" '_cp_main --help | grep -q -- "--export"'
+check "README exists"     '[ -f "$HERE/README.md" ]'
+check "README warns about profiles being ignored" 'grep -q "gitignore" "$HERE/README.md"'
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
