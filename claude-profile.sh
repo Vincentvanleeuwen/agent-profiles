@@ -247,12 +247,71 @@ _cp_cmd_update() {
     printf 'updated %s <- %s\n' "$_n" "$_from"
 }
 
+_cp_cmd_delete() {
+    _n="$1"
+    _cp_exists "$_n" || { printf 'claude-profile: no such profile "%s"\n' "$_n" >&2; return 1; }
+    if [ "$(_cp_selected)" = "$_n" ]; then
+        printf 'claude-profile: "%s" is active; run "claude profile default" first\n' "$_n" >&2
+        return 1
+    fi
+    if [ -z "${_CP_YES:-}" ]; then
+        printf 'delete profile "%s"? type the name to confirm: ' "$_n"
+        read -r _answer
+        if [ "$_answer" != "$_n" ]; then
+            printf 'cancelled\n'
+            return 1
+        fi
+    fi
+    if ! _bk=$(_cp_backup "$_n"); then
+        printf 'claude-profile: backup failed, not deleting "%s"\n' "$_n" >&2
+        return 1
+    fi
+    printf 'deleted %s (kept at %s)\n' "$_n" "$_bk"
+}
+
+_cp_cmd_rename() {
+    _o="$1"; _n="$2"
+    _cp_exists "$_o" || { printf 'claude-profile: no such profile "%s"\n' "$_o" >&2; return 1; }
+    _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
+    _cp_exists "$_n" && { printf 'claude-profile: "%s" already exists\n' "$_n" >&2; return 1; }
+    if ! mv "$(_cp_dir "$_o")" "$(_cp_dir "$_n")"; then
+        printf 'claude-profile: rename failed\n' >&2
+        return 1
+    fi
+    # Third argument is the OLD profile dir: after the mv, settings.json still
+    # carries the old profile's paths, and that pass is what retargets them.
+    if ! _cp_rewrite "$(_cp_dir "$_n")/settings.json" "$(_cp_dir "$_n")" "$(_cp_dir "$_o")"; then
+        printf 'claude-profile: renamed to "%s" but path rewrite failed; fix settings.json paths manually\n' "$_n" >&2
+        return 1
+    fi
+    if [ "$(_cp_read_name "$(_cp_store)/active" 2>/dev/null)" = "$_o" ]; then
+        printf '%s\n' "$_n" > "$(_cp_store)/active"
+    fi
+    printf 'renamed %s -> %s\n' "$_o" "$_n"
+}
+
+_cp_cmd_copy() {
+    _s="$1"; _n="$2"
+    _cp_exists "$_s" || { printf 'claude-profile: no such profile "%s"\n' "$_s" >&2; return 1; }
+    _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
+    _cp_exists "$_n" && { printf 'claude-profile: "%s" already exists\n' "$_n" >&2; return 1; }
+    if ! _cp_build "$(_cp_dir "$_s")" "$(_cp_dir "$_n")"; then
+        printf 'claude-profile: failed to copy "%s"\n' "$_s" >&2
+        rm -rf "$(_cp_dir "$_n")"
+        return 1
+    fi
+    printf 'copied %s -> %s\n' "$_s" "$_n"
+}
+
 _cp_main() {
     case "${1:-}" in
         "")                 _cp_cmd_status ;;
         default|--reset)    _cp_cmd_default ;;
         --create)           shift; _cp_cmd_create "$@" ;;
         --update)           shift; _cp_cmd_update "$@" ;;
+        --delete)           shift; _cp_cmd_delete "$@" ;;
+        --rename)           shift; _cp_cmd_rename "$@" ;;
+        --copy)             shift; _cp_cmd_copy "$@" ;;
         -h|--help)          _cp_cmd_status ;;
         -*)                 printf 'claude-profile: unknown option %s\n' "$1" >&2; return 1 ;;
         *)

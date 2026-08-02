@@ -273,5 +273,50 @@ eq "update refuses self as source" "$?" "1"
 check "self-update left profile intact" '[ -f "$TMP/store/profiles/fin/settings.json" ]'
 _cp_main default >/dev/null
 
+echo "== Task 6: delete, rename, copy =="
+
+_cp_main --create tmp1 >/dev/null
+_CP_YES=1 _cp_main --delete tmp1 >/dev/null
+# _CP_YES prefixed on a shell function (unlike an external command) leaks
+# into the rest of this script, same as _CP_RUNNER above — unset it so later
+# deletes still exercise the stdin confirmation prompt.
+unset _CP_YES
+check "delete removes profile"  '[ ! -d "$TMP/store/profiles/tmp1" ]'
+check "delete backs up"         'ls -d "$TMP/store/.backups/tmp1-"* >/dev/null 2>&1'
+
+_cp_main --create tmp2 >/dev/null
+_cp_main tmp2 >/dev/null
+_CP_YES=1 _cp_main --delete tmp2 >/dev/null 2>&1
+eq "delete refuses active profile" "$?" "1"
+unset _CP_YES
+check "active profile survived"    '[ -d "$TMP/store/profiles/tmp2" ]'
+_cp_main default >/dev/null
+
+printf 'no\n' | _cp_main --delete tmp2 >/dev/null 2>&1
+check "delete without confirmation keeps profile" '[ -d "$TMP/store/profiles/tmp2" ]'
+
+# Pair with proof the stdin-confirmation path actually deletes, so the check
+# above cannot pass vacuously against a delete that is entirely broken/no-op.
+_cp_main --create tmp2b >/dev/null
+printf 'tmp2b\n' | _cp_main --delete tmp2b >/dev/null 2>&1
+check "delete with typed confirmation removes profile" '[ ! -d "$TMP/store/profiles/tmp2b" ]'
+
+_cp_main --rename tmp2 tmp3 >/dev/null
+check "rename moved dir"     '[ -d "$TMP/store/profiles/tmp3" ] && [ ! -d "$TMP/store/profiles/tmp2" ]'
+check "rename fixed paths"   'grep -q "$TMP/store/profiles/tmp3/hooks/demo.sh" "$TMP/store/profiles/tmp3/settings.json"'
+
+_cp_main --copy tmp3 tmp4 >/dev/null
+check "copy made a new dir"  '[ -d "$TMP/store/profiles/tmp4" ]'
+check "copy fixed paths"     'grep -q "$TMP/store/profiles/tmp4/hooks/demo.sh" "$TMP/store/profiles/tmp4/settings.json"'
+check "copy kept symlinks"   '[ -L "$TMP/store/profiles/tmp4/plugins" ]'
+eq    "copy symlink to base" "$(readlink "$TMP/store/profiles/tmp4/plugins")" "$FAKEHOME/.claude/plugins"
+
+_cp_main --copy tmp3 tmp4 >/dev/null 2>&1
+eq "copy refuses existing target" "$?" "1"
+
+_CP_YES=1 _cp_main --delete tmp3 >/dev/null
+_CP_YES=1 _cp_main --delete tmp4 >/dev/null
+unset _CP_YES
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
