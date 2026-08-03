@@ -151,8 +151,26 @@ _cp_main default >/dev/null
 check "default clears active" '[ ! -f "$TMP/store/active" ]'
 eq    "default falls back"    "$(_cp_resolve)" "$FAKEHOME/.claude"
 
-_cp_main --reset >/dev/null
-check "--reset is an alias for default" '[ ! -f "$TMP/store/active" ]'
+# --reset wipes the profile's own config but keeps it existing, active, and
+# linked to base. It is no longer an alias for "default".
+_cp_main --copy dev wipeme >/dev/null
+_cp_main wipeme >/dev/null
+printf 'x\n' > "$TMP/store/profiles/wipeme/CLAUDE.md"
+_CP_YES=1 _cp_main --reset >/dev/null
+check "--reset keeps the profile"      '[ -d "$TMP/store/profiles/wipeme" ]'
+check "--reset does not clear active"  '[ "$(cat "$TMP/store/active")" = wipeme ]'
+check "--reset drops owned config"     '[ ! -e "$TMP/store/profiles/wipeme/CLAUDE.md" ]'
+check "--reset drops settings.json"    '[ ! -e "$TMP/store/profiles/wipeme/settings.json" ]'
+eq    "--reset relinks shared"         "$(readlink "$TMP/store/profiles/wipeme/plugins")" "$FAKEHOME/.claude/plugins"
+check "--reset backed up old copy"     'ls "$TMP/store/.backups" | grep -q "^wipeme-"'
+_CP_YES=1 _cp_main --reset nope >/dev/null 2>&1
+eq "--reset refuses unknown profile" "$?" "1"
+
+_cp_main default >/dev/null
+_CP_YES=1 _cp_main --reset >/dev/null 2>&1
+eq "--reset refuses with no profile selected" "$?" "1"
+check "--reset left base config alone" '[ -f "$FAKEHOME/.claude/settings.json" ]'
+_CP_YES=1 _cp_main --delete wipeme >/dev/null
 
 _cp_main unknown-name >/dev/null 2>&1
 eq "set refuses unknown profile" "$?" "1"

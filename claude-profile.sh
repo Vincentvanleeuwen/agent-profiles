@@ -271,6 +271,46 @@ _cp_cmd_update() {
     printf 'updated %s <- %s\n' "$_n" "$_from"
 }
 
+# Wipe a profile back to a first-run ~/.claude: nothing profile-owned left, and
+# shared paths still linked to base so you are not logged out. Building from an
+# empty directory is exactly that, so there is no second teardown path to keep in
+# sync with _cp_build. Never operates on ~/.claude itself.
+_cp_cmd_reset() {
+    _n="${1:-$(_cp_selected)}"
+    if [ -z "$_n" ]; then
+        printf 'claude-profile: no profile selected; --reset never touches ~/.claude\n' >&2
+        return 1
+    fi
+    if ! _cp_exists "$_n"; then
+        printf 'claude-profile: no such profile "%s"\n' "$_n" >&2
+        return 1
+    fi
+    # Confirm even though the old contents are backed up: --reset used to be an
+    # alias for "default", so muscle memory aims it at a profile people meant to
+    # only switch away from.
+    if [ -z "${_CP_YES:-}" ]; then
+        printf 'reset profile "%s" to a fresh ~/.claude? type the name to confirm: ' "$_n"
+        read -r _answer
+        if [ "$_answer" != "$_n" ]; then
+            printf 'cancelled\n'
+            return 1
+        fi
+    fi
+    if ! _bk=$(_cp_backup "$_n"); then
+        printf 'claude-profile: backup failed, not resetting "%s"\n' "$_n" >&2
+        return 1
+    fi
+    _empty=$(mktemp -d) || return 1
+    if ! _cp_build "$_empty" "$(_cp_dir "$_n")"; then
+        rmdir "$_empty"
+        printf 'claude-profile: failed to reset "%s"; previous contents at %s\n' "$_n" "$_bk" >&2
+        return 1
+    fi
+    rmdir "$_empty"
+    printf 'backed up -> %s\n' "$_bk"
+    printf 'reset %s (fresh config; shared paths still linked to base)\n' "$_n"
+}
+
 _cp_cmd_delete() {
     _n="$1"
     _cp_exists "$_n" || { printf 'claude-profile: no such profile "%s"\n' "$_n" >&2; return 1; }
@@ -550,11 +590,12 @@ _cp_cmd_help() {
     cat <<'EOF'
 claude profile                       show active profile and list all
 claude profile <name>                set the active profile
-claude profile default               clear the active profile (alias: --reset)
+claude profile default               clear the active profile (back to ~/.claude)
 claude profile <name> -- <args>      run one session in <name>, active unchanged
 
 claude profile --create <name>       snapshot the current setup into a new profile
 claude profile --update <name>       mirror the current setup into an existing profile
+claude profile --reset [name]        wipe a profile back to a fresh config (default: active)
 claude profile --delete <name>       delete a profile (backed up first)
 claude profile --rename <a> <b>      rename a profile
 claude profile --copy <a> <b>        duplicate a profile
@@ -576,7 +617,8 @@ EOF
 _cp_main() {
     case "${1:-}" in
         "")                 _cp_cmd_status ;;
-        default|--reset)    _cp_cmd_default ;;
+        default)            _cp_cmd_default ;;
+        --reset)            shift; _cp_cmd_reset "$@" ;;
         --create)           shift; _cp_cmd_create "$@" ;;
         --update)           shift; _cp_cmd_update "$@" ;;
         --delete)           shift; _cp_cmd_delete "$@" ;;

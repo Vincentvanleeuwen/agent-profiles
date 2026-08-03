@@ -31,10 +31,11 @@ plain `~/.claude`.
 |---|---|
 | `claude profile` | Active profile, why it was selected, and the full list |
 | `claude profile <name>` | Set the active profile |
-| `claude profile default` | Clear it. Alias `--reset` |
+| `claude profile default` | Clear it; back to plain `~/.claude` |
 | `claude profile <name> -- <args>` | One session in `<name>`; active unchanged |
 | `claude profile --create <name>` | Snapshot the current setup |
 | `claude profile --update <name>` | Mirror the current setup into `<name>` |
+| `claude profile --reset [name]` | Wipe `<name>` (default: active) back to a first-run config; old contents moved to `.backups/`. Shared paths stay linked, so you stay logged in |
 | `claude profile --delete <name>` | Delete (moved to `.backups/`) |
 | `claude profile --rename <a> <b>` | Rename |
 | `claude profile --copy <a> <b>` | Duplicate |
