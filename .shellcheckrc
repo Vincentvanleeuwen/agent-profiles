@@ -10,6 +10,11 @@ disable=SC2016  # "expressions don't expand in single quotes" — the eval strin
 disable=SC2034  # "appears unused" — variables read only inside check '...' strings
 disable=SC2329  # "function never invoked" — date() stubs, called indirectly by the code under test
 
+# The lib/ files are sourced from a loop variable, so the path is not a literal
+# shellcheck can follow. Each lib file is passed as its own input instead, which
+# checks the same code without needing the source to be traceable.
+disable=SC1090  # "can't follow non-constant source" — the `for _cp_f in ...` loader
+
 # BASH_SOURCE with a ${(%):-%x} zsh fallback is the deliberate dual-shell way to
 # find our own path; only one branch is ever expanded per shell. See the comment
 # at the top of claude-profile.sh.

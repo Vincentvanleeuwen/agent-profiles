@@ -544,7 +544,7 @@ check "parses under bash"  'bash -n "$HERE/claude-profile.sh"'
 check_with "parses under zsh" zsh 'zsh -n "$HERE/claude-profile.sh"'
 # Suppressions and shell= live in .shellcheckrc, so this stays a bare invocation.
 check_with "passes shellcheck" shellcheck \
-  'shellcheck "$HERE/claude-profile.sh" "$HERE/test.sh"'
+  'shellcheck "$HERE/claude-profile.sh" "$HERE"/lib/*.sh "$HERE/test.sh"'
 # Excludes POSIX character classes like [[:space:]] ("[[" followed by ":"),
 # which are legitimate sh and not the bash [[ ]] test bashism.
 check "no bashisms: no [[" '! grep -qE "\[\[[^:]" "$HERE/claude-profile.sh"'
