@@ -137,6 +137,7 @@ _cp_build() {
     done
     _cp_rewrite "$_dest/settings.json" "$_dest" "$_src" || return 1
     _cp_seed_auth "$_dest"
+    _cp_sync_prompts "$_dest"
     return 0
 }
 
@@ -196,6 +197,97 @@ except OSError:
     except OSError:
         pass
     sys.exit(0)
+EOF
+    return 0
+}
+
+# Per-project "you already answered this" state — the trust dialog, the
+# CLAUDE.md external-include approval, project onboarding — lives inside
+# .claude.json, which is per-profile on purpose (it also carries mcpServers and
+# per-project prompt history that must not leak between profiles). Re-answering
+# the same trust prompt in every profile is pure friction though, so union just
+# those flags through a shared registry in the store. Base ~/.claude.json is
+# read as a seed but never written: Claude Code rewrites it constantly and a
+# read-modify-write from here would race a live session.
+# Called before a session to pick up what other profiles trusted, and after it
+# to publish what this one accepted. Only ever sets a flag, never clears one,
+# so untrusting a folder still has to be redone per profile.
+# ponytail: python3 only; without it you get the old re-prompting, not a break.
+# ponytail: no lock; a second session on the same profile can lose a flag,
+# which costs one re-prompt. Add flock if that ever actually bites.
+_cp_sync_prompts() {
+    _sp_dir="$1"
+    [ "$_sp_dir" = "$HOME/.claude" ] && return 0
+    [ -f "$_sp_dir/.claude.json" ] || return 0
+    command -v python3 >/dev/null 2>&1 || return 0
+    python3 - "$_sp_dir/.claude.json" "$(_cp_store)/prompt-state.json" \
+             "$HOME/.claude.json" <<'EOF'
+import json, os, sys
+
+prof_path, reg_path, base_path = sys.argv[1:4]
+KEYS = (
+    "hasTrustDialogAccepted",
+    "hasCompletedProjectOnboarding",
+    "hasClaudeMdExternalIncludesApproved",
+    "hasClaudeMdExternalIncludesWarningShown",
+)
+
+def load(p):
+    try:
+        with open(p) as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+def projects(d):
+    p = d.get("projects")
+    return p if isinstance(p, dict) else {}
+
+prof = load(prof_path)
+if not prof:
+    sys.exit(0)  # unreadable or empty: never overwrite it blind
+reg = load(reg_path)
+
+merged = {}
+for src in (load(base_path), reg, prof):
+    for path, cfg in projects(src).items():
+        if isinstance(cfg, dict):
+            for k in KEYS:
+                if cfg.get(k):
+                    merged.setdefault(path, {})[k] = True
+
+def write(path, data):
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+# Registry is stored in the same {"projects": {...}} shape as the files it
+# merges, so one accessor reads all three.
+if merged != projects(reg):
+    write(reg_path, {"projects": merged})
+
+prof_projects = projects(prof)
+changed = False
+for path, flags in merged.items():
+    cfg = prof_projects.get(path)
+    if not isinstance(cfg, dict):
+        cfg = {}
+        prof_projects[path] = cfg
+    for k in flags:
+        if not cfg.get(k):
+            cfg[k] = True
+            changed = True
+if changed:
+    prof["projects"] = prof_projects
+    write(prof_path, prof)
 EOF
     return 0
 }
@@ -283,13 +375,24 @@ _cp_run_claude() {
     fi
 }
 
+# Single choke point for starting a session: pull shared prompt state in,
+# run, push back whatever this session accepted.
+_cp_launch() {
+    _l_dir="$1"; shift
+    _cp_sync_prompts "$_l_dir"
+    CLAUDE_CONFIG_DIR="$_l_dir" _cp_run_claude "$@"
+    _l_rc=$?
+    _cp_sync_prompts "$_l_dir"
+    return $_l_rc
+}
+
 _cp_cmd_run() {
     _n="$1"; shift
     if ! _cp_exists "$_n"; then
         printf 'claude-profile: no such profile "%s"\n' "$_n" >&2
         return 1
     fi
-    CLAUDE_CONFIG_DIR="$(_cp_dir "$_n")" _cp_run_claude "$@"
+    _cp_launch "$(_cp_dir "$_n")" "$@"
 }
 
 _cp_backup() {
@@ -711,5 +814,5 @@ claude() {
         _cp_main "$@"
         return $?
     fi
-    CLAUDE_CONFIG_DIR="$(_cp_resolve)" command claude "$@"
+    _cp_launch "$(_cp_resolve)" "$@"
 }

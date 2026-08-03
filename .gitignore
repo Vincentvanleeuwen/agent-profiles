@@ -4,3 +4,4 @@ active
 .DS_Store
 .superpowers/
 docs/
+prompt-state.json

@@ -689,5 +689,51 @@ check "seed writes nothing when base has no account" \
    '[ ! -f "$TMP/seed/nobase/.claude.json" ]'
 rm -rf "$TMP/seed"
 
+echo "== shared prompt state =="
+
+rm -f "$CLAUDE_PROFILES_DIR/prompt-state.json"
+cat > "$FAKEHOME/.claude.json" <<'JSON'
+{ "projects": { "/repo/base": { "hasTrustDialogAccepted": true } } }
+JSON
+
+# Profile A trusts /repo/a on its own; base already trusts /repo/base.
+mkdir -p "$TMP/ps/a" "$TMP/ps/b"
+cat > "$TMP/ps/a/.claude.json" <<'JSON'
+{ "mcpServers": { "figma": {} },
+  "projects": { "/repo/a": { "hasTrustDialogAccepted": true, "history": ["secret"] } } }
+JSON
+printf '{"projects":{}}\n' > "$TMP/ps/b/.claude.json"
+
+_cp_sync_prompts "$TMP/ps/a"
+_cp_sync_prompts "$TMP/ps/b"
+
+check "registry is created in the store" \
+   '[ -f "$CLAUDE_PROFILES_DIR/prompt-state.json" ]'
+check "profile A picks up base's trusted folder" \
+   'grep -q "/repo/base" "$TMP/ps/a/.claude.json"'
+check "profile B picks up profile A's trusted folder" \
+   'grep -q "/repo/a" "$TMP/ps/b/.claude.json"'
+check "profile B picks up base's trusted folder" \
+   'grep -q "/repo/base" "$TMP/ps/b/.claude.json"'
+check "sync keeps per-profile mcpServers" \
+   'grep -q "figma" "$TMP/ps/a/.claude.json"'
+check "sync never leaks prompt history between profiles" \
+   '! grep -q "secret" "$TMP/ps/b/.claude.json"'
+check "base ~/.claude.json is never written" \
+   '! grep -q "/repo/a" "$FAKEHOME/.claude.json"'
+
+# Base config dir is not a profile: must be left alone entirely.
+_cp_sync_prompts "$FAKEHOME/.claude"
+check "sync skips the base config dir" \
+   '! grep -q "/repo/a" "$FAKEHOME/.claude.json"'
+
+# Missing .claude.json: silent no-op, not a crash.
+mkdir -p "$TMP/ps/empty"
+_cp_sync_prompts "$TMP/ps/empty"
+eq "sync succeeds with no .claude.json" "$?" "0"
+check "sync creates no .claude.json out of nothing" \
+   '[ ! -f "$TMP/ps/empty/.claude.json" ]'
+rm -rf "$TMP/ps"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
