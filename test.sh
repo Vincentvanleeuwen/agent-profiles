@@ -638,5 +638,56 @@ eq "_cp_owned on dir with no dot-entries succeeds" "$?" "0"
 check "_cp_owned still lists the real entry" 'printf "%s" "$out" | grep -q settings.json'
 rm -rf "$TMP/h2owned"
 
+echo "== Task 15: login identity seeded into fresh profiles =="
+# $HOME/.claude.json sits beside ~/.claude, not inside it, so _cp_build's copy
+# loop never sees it. Without the seed a profile built from base — or wiped by
+# --reset — starts with no oauthAccount and drops you on the login screen even
+# though the keychain token is still there.
+HOME="$FAKEHOME" # _cp_seed_auth reads $HOME/.claude.json
+printf '{"oauthAccount":{"emailAddress":"base@example.com"},"userID":"uid-1",
+         "hasCompletedOnboarding":true,"lastOnboardingVersion":"9.9.9",
+         "projects":{"/somewhere":{"x":1}}}\n' > "$FAKEHOME/.claude.json"
+
+# Fresh (empty) profile: identity seeded, nothing else dragged along.
+mkdir -p "$TMP/seed/fresh"
+_cp_seed_auth "$TMP/seed/fresh"
+check "seed creates .claude.json for a fresh profile" '[ -f "$TMP/seed/fresh/.claude.json" ]'
+check "seed copies oauthAccount" \
+   'grep -q "base@example.com" "$TMP/seed/fresh/.claude.json"'
+check "seed copies hasCompletedOnboarding so onboarding does not re-run" \
+   'grep -q "hasCompletedOnboarding" "$TMP/seed/fresh/.claude.json"'
+check "seed does not drag base projects into the profile" \
+   '! grep -q "somewhere" "$TMP/seed/fresh/.claude.json"'
+
+# A profile that already has an identity must never be rewritten.
+mkdir -p "$TMP/seed/owned"
+printf '{"oauthAccount":{"emailAddress":"mine@example.com"},"mcpServers":{"a":1}}\n' \
+   > "$TMP/seed/owned/.claude.json"
+_cp_seed_auth "$TMP/seed/owned"
+check "seed leaves an existing account alone" \
+   'grep -q "mine@example.com" "$TMP/seed/owned/.claude.json"'
+check "seed does not clobber existing base@ into an owned profile" \
+   '! grep -q "base@example.com" "$TMP/seed/owned/.claude.json"'
+
+# Profile with data but no identity: merge in, keep everything else.
+mkdir -p "$TMP/seed/partial"
+printf '{"mcpServers":{"b":2},"numStartups":9}\n' > "$TMP/seed/partial/.claude.json"
+_cp_seed_auth "$TMP/seed/partial"
+check "seed merges identity into a profile that has none" \
+   'grep -q "base@example.com" "$TMP/seed/partial/.claude.json"'
+check "seed preserves per-profile mcpServers" \
+   'grep -q "mcpServers" "$TMP/seed/partial/.claude.json"'
+check "seed preserves other per-profile keys" \
+   'grep -q "numStartups" "$TMP/seed/partial/.claude.json"'
+
+# No base identity to seed from: must be a silent no-op, not a crash.
+printf '{"numStartups":1}\n' > "$FAKEHOME/.claude.json"
+mkdir -p "$TMP/seed/nobase"
+_cp_seed_auth "$TMP/seed/nobase"
+eq "seed succeeds when base has no account" "$?" "0"
+check "seed writes nothing when base has no account" \
+   '[ ! -f "$TMP/seed/nobase/.claude.json" ]'
+rm -rf "$TMP/seed"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

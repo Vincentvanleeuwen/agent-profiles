@@ -136,6 +136,67 @@ _cp_build() {
         ln -s "$HOME/.claude/$_b" "$_dest/$_b" || return 1
     done
     _cp_rewrite "$_dest/settings.json" "$_dest" "$_src" || return 1
+    _cp_seed_auth "$_dest"
+    return 0
+}
+
+# .claude.json stays per-profile (it carries mcpServers and per-project history
+# that must not leak between profiles), but the login identity inside it is not
+# profile-specific: the OAuth token itself lives in the macOS keychain, shared.
+# Two cases leave a profile with no identity and drop you on the login screen:
+# a profile built from base ~/.claude, whose .claude.json lives at $HOME level
+# and so is never seen by the copy loop above, and --reset, which builds from an
+# empty directory on purpose. Seed just the identity keys back from base so the
+# keychain token is actually usable. Never overwrites a profile that already has
+# an account, and never touches anything else in the file.
+# ponytail: python3 only; if it is missing you get the old re-login, not a break.
+_cp_seed_auth() {
+    _sa_dest="$1/.claude.json"
+    _sa_base="$HOME/.claude.json"
+    [ -f "$_sa_base" ] || return 0
+    command -v python3 >/dev/null 2>&1 || return 0
+    python3 - "$_sa_dest" "$_sa_base" <<'EOF'
+import json, os, sys
+
+dest_path, base_path = sys.argv[1], sys.argv[2]
+KEYS = ("oauthAccount", "userID", "hasCompletedOnboarding", "lastOnboardingVersion")
+
+def load(p):
+    try:
+        with open(p) as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+base = load(base_path)
+if base is None or "oauthAccount" not in base:
+    sys.exit(0)
+
+dest = load(dest_path)
+if dest is None:
+    if os.path.exists(dest_path):
+        sys.exit(0)  # unreadable or not an object: leave it alone
+    dest = {}
+elif "oauthAccount" in dest:
+    sys.exit(0)  # profile already has an identity
+
+for k in KEYS:
+    if k in base:
+        dest[k] = base[k]
+
+tmp = dest_path + ".tmp"
+try:
+    with open(tmp, "w") as fh:
+        json.dump(dest, fh, indent=2)
+    os.replace(tmp, dest_path)
+except OSError:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    sys.exit(0)
+EOF
     return 0
 }
 
