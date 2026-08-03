@@ -70,7 +70,7 @@ claude profile --copy <a> <b>        duplicate a profile
 claude profile --show <name>         model, plugins, skills, hooks, mcp servers
 claude profile --diff <a> <b>        the same, for two profiles
 
-claude profile --export <name> [f]   write a shareable tarball (no credentials)
+claude profile --export <name> [f]   tarball to exports/ (no credentials)
 claude profile --import <file> [n]   create a profile from a tarball
 
 claude profile --install-statusline    show the running profile (or default) in your statusline

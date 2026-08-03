@@ -41,7 +41,7 @@ plain `~/.claude`.
 | `claude profile --copy <a> <b>` | Duplicate |
 | `claude profile --show <name>` | Model, plugins, skills, hooks, MCP servers |
 | `claude profile --diff <a> <b>` | The same, side by side |
-| `claude profile --export <name> [file]` | Shareable tarball, excludes `.credentials.json` (see Security notes) |
+| `claude profile --export <name> [file]` | Shareable tarball into `exports/` (override with `file`), excludes `.credentials.json` (see Security notes) |
 | `claude profile --import <file> [name]` | Create a profile from a tarball |
 | `claude profile --install-statusline` | Show the running profile (or `default`) in your statusline |
 | `claude profile --uninstall-statusline` | Remove it |

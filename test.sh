@@ -404,6 +404,10 @@ check "archive omits projects"    '! tar tzf "$TMP/dev.tar.gz" | grep -q "^proje
 check "export warns about env block" 'printf "%s" "$_experr" | grep -q "env"'
 check "export manifest lists a known entry" 'printf "%s" "$_experr" | grep -q "settings.json"'
 
+# No path argument: the archive lands in the store's exports/ directory.
+_cp_main --export dev >/dev/null 2>&1
+check "export defaults to exports/" '[ -s "$TMP/store/exports/dev.tar.gz" ]'
+
 _impout=$(_cp_main --import "$TMP/dev.tar.gz" imported)
 check "import created profile"    '[ -d "$TMP/store/profiles/imported" ]'
 check "import relinked plugins"   '[ -L "$TMP/store/profiles/imported/plugins" ]'

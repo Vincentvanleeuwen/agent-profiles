@@ -75,7 +75,12 @@ _cp_owned() {
 _cp_cmd_export() {
     _n="$1"
     _cp_need "$_n" || return 1
-    _out="${2:-./$_n.tar.gz}"
+    if [ -n "${2:-}" ]; then
+        _out="$2"
+    else
+        _out="$(_cp_store)/exports/$_n.tar.gz"
+        mkdir -p "$(_cp_store)/exports" || return 1
+    fi
     _d=$(_cp_dir "$_n")
     if [ -e "$_d/.credentials.json" ] && [ ! -L "$_d/.credentials.json" ]; then
         printf 'claude-profile: refusing to export "%s": .credentials.json is a real file\n' "$_n" >&2

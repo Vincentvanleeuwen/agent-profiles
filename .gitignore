@@ -1,4 +1,5 @@
 profiles/
+exports/
 active
 .backups/
 .DS_Store
