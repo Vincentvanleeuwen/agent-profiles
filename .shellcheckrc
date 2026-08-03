@@ -1,0 +1,17 @@
+# claude-profile.sh is sourced, not executed, so it has no shebang to infer from.
+shell=sh
+
+# test.sh drives everything through `check "name" 'shell expression'`, which
+# eval's its second argument. shellcheck cannot see through eval, so every
+# variable used only inside those strings looks unexpanded or unused. Disabling
+# these four is what keeps a run readable: 145 of the 148 findings on a clean
+# tree were this idiom.
+disable=SC2016  # "expressions don't expand in single quotes" — the eval strings, and the statusline block, which must stay literal
+disable=SC2034  # "appears unused" — variables read only inside check '...' strings
+disable=SC2329  # "function never invoked" — date() stubs, called indirectly by the code under test
+
+# BASH_SOURCE with a ${(%):-%x} zsh fallback is the deliberate dual-shell way to
+# find our own path; only one branch is ever expanded per shell. See the comment
+# at the top of claude-profile.sh.
+disable=SC3028  # "BASH_SOURCE is undefined in POSIX sh"
+disable=SC2296  # "parameter expansions can't start with (" — the zsh half

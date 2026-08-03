@@ -7,6 +7,15 @@ ok()   { printf '  ok   %s\n' "$1"; }
 no()   { printf '  FAIL %s\n' "$1"; fails=$((fails + 1)); }
 check(){ if eval "$2"; then ok "$1"; else no "$1"; fi; }
 eq()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1 (got '$2' want '$3')"; fi; }
+skip() { printf '  skip %s (%s not installed)\n' "$1" "$2"; }
+
+# check_with LABEL TOOL EXPR — a check that is skipped when TOOL is absent.
+# The old idiom here was `{ command -v tool && tool ...; } || true`, which also
+# swallowed a real failure: a genuine parse error reported "ok". Only a missing
+# tool may skip; anything else has to fail.
+check_with() {
+    if command -v "$2" >/dev/null 2>&1; then check "$1" "$3"; else skip "$1" "$2"; fi
+}
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 TMP=$(mktemp -d)
@@ -44,6 +53,10 @@ JSON
 
 HOME="$FAKEHOME"
 export HOME
+# The suite asserts on the unset case (statusline "[default]"), so an inherited
+# CLAUDE_CONFIG_DIR — which is exactly what you have when you run the tests from
+# inside a profile — must not leak in.
+unset CLAUDE_CONFIG_DIR CLAUDE_PROFILE
 CLAUDE_PROFILES_DIR="$TMP/store"
 export CLAUDE_PROFILES_DIR
 mkdir -p "$CLAUDE_PROFILES_DIR"
@@ -462,7 +475,11 @@ printf 'hand edited after uninstall\n' >> "$FAKEHOME/.claude/statusline.sh"
 _cp_main --install-statusline >/dev/null
 eq "first backup still holds the true original" \
    "$(cat "$FAKEHOME/.claude/statusline.sh.bak")" "$_slorig"
-_bakcount=$(ls "$FAKEHOME"/.claude/statusline.sh.bak.* 2>/dev/null | wc -l | tr -d ' ')
+# Count via the glob rather than `ls | wc -l`: no subshell, no whitespace to
+# trim, and an unmatched glob is detectable instead of counting as one file.
+set -- "$FAKEHOME"/.claude/statusline.sh.bak.*
+[ -e "$1" ] || set --
+_bakcount=$#
 eq "timestamped sibling backup created" "$_bakcount" "1"
 check "timestamped sibling holds the edited state" \
   'grep -q "hand edited after uninstall" "$FAKEHOME"/.claude/statusline.sh.bak.*'
@@ -522,10 +539,12 @@ check "no nesting inside first backup" '[ ! -d "$bk1/colla" ]'
 
 echo "== Task 10: portability and help =="
 
-check "sourceable under dash if present" \
-  '{ command -v dash >/dev/null 2>&1 && dash -n "$HERE/claude-profile.sh"; } || true'
+check_with "parses under dash" dash 'dash -n "$HERE/claude-profile.sh"'
 check "parses under bash"  'bash -n "$HERE/claude-profile.sh"'
-check "parses under zsh"   '{ command -v zsh >/dev/null 2>&1 && zsh -n "$HERE/claude-profile.sh"; } || true'
+check_with "parses under zsh" zsh 'zsh -n "$HERE/claude-profile.sh"'
+# Suppressions and shell= live in .shellcheckrc, so this stays a bare invocation.
+check_with "passes shellcheck" shellcheck \
+  'shellcheck "$HERE/claude-profile.sh" "$HERE/test.sh"'
 # Excludes POSIX character classes like [[:space:]] ("[[" followed by ":"),
 # which are legitimate sh and not the bash [[ ]] test bashism.
 check "no bashisms: no [[" '! grep -qE "\[\[[^:]" "$HERE/claude-profile.sh"'
