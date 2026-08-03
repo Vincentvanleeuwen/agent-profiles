@@ -119,7 +119,10 @@ _cp_build() {
         _b="${_e##*/}"
         _cp_is_skipped "$_b" && continue
         _cp_is_shared "$_b" && continue
-        rm -rf "$_dest/$_b" || return 1
+        # ${_dest:?} on every rm -rf: the mkdir -p above already fails on an
+        # empty $_dest, but that guard is far enough away that it should not be
+        # the only thing standing between a typo and "rm -rf /".
+        rm -rf "${_dest:?}/$_b" || return 1
         # -L dereferences: relative symlink copied as link would resolve
         # against profile directory and dangle. A profile is a snapshot,
         # so copy content by value.
@@ -132,7 +135,7 @@ _cp_build() {
     # --update, same as --import already does.
     for _b in $(printf '%s' "$_CP_SHARED"); do
         [ -e "$HOME/.claude/$_b" ] || continue
-        rm -rf "$_dest/$_b" || return 1
+        rm -rf "${_dest:?}/$_b" || return 1
         ln -s "$HOME/.claude/$_b" "$_dest/$_b" || return 1
     done
     _cp_rewrite "$_dest/settings.json" "$_dest" "$_src" || return 1
@@ -304,13 +307,35 @@ _cp_valid_name() {
     esac
 }
 
+# Every command opens with the same name checks, so the wording lives here:
+# one place to fix a message, and callers read as a single guard line.
+_cp_no_such()  { printf 'claude-profile: no such profile "%s"\n' "$1" >&2; return 1; }
+_cp_bad_name() { printf 'claude-profile: bad name "%s"\n' "$1" >&2; return 1; }
+_cp_taken()    { printf 'claude-profile: "%s" already exists\n' "$1" >&2; return 1; }
+
+# Name must already be a profile.
+_cp_need() { _cp_exists "$1" || _cp_no_such "$1"; }
+
+# Name must be usable for a profile that does not exist yet.
+_cp_free() {
+    _cp_valid_name "$1" || { _cp_bad_name "$1"; return 1; }
+    if _cp_exists "$1"; then _cp_taken "$1"; return 1; fi
+    return 0
+}
+
+# Destructive commands make you type the profile name back. _CP_YES skips it.
+_cp_confirm() {
+    [ -n "${_CP_YES:-}" ] && return 0
+    printf '%s' "$2"
+    read -r _cf_answer
+    [ "$_cf_answer" = "$1" ] && return 0
+    printf 'cancelled\n'
+    return 1
+}
+
 _cp_cmd_create() {
     _n="$1"
-    _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
-    if _cp_exists "$_n"; then
-        printf 'claude-profile: profile "%s" already exists\n' "$_n" >&2
-        return 1
-    fi
+    _cp_free "$_n" || return 1
     _from=$(_cp_resolve) || return 1
     mkdir -p "$(_cp_store)/profiles"
     if ! _cp_build "$_from" "$(_cp_dir "$_n")"; then
@@ -323,10 +348,7 @@ _cp_cmd_create() {
 
 _cp_cmd_set() {
     _n="$1"
-    if ! _cp_exists "$_n"; then
-        printf 'claude-profile: no such profile "%s"\n' "$_n" >&2
-        return 1
-    fi
+    _cp_need "$_n" || return 1
     if ! printf '%s\n' "$_n" > "$(_cp_store)/active"; then
         printf 'claude-profile: could not write %s/active\n' "$(_cp_store)" >&2
         return 1
@@ -388,10 +410,7 @@ _cp_launch() {
 
 _cp_cmd_run() {
     _n="$1"; shift
-    if ! _cp_exists "$_n"; then
-        printf 'claude-profile: no such profile "%s"\n' "$_n" >&2
-        return 1
-    fi
+    _cp_need "$_n" || return 1
     _cp_launch "$(_cp_dir "$_n")" "$@"
 }
 
@@ -414,10 +433,7 @@ _cp_backup() {
 
 _cp_cmd_update() {
     _n="$1"
-    if ! _cp_exists "$_n"; then
-        printf 'claude-profile: no such profile "%s"\n' "$_n" >&2
-        return 1
-    fi
+    _cp_need "$_n" || return 1
     _from=$(_cp_resolve)
     if [ "$_from" = "$(_cp_dir "$_n")" ]; then
         printf 'claude-profile: "%s" is the active source; switch away first\n' "$_n" >&2
@@ -445,21 +461,11 @@ _cp_cmd_reset() {
         printf 'claude-profile: no profile selected; --reset never touches ~/.claude\n' >&2
         return 1
     fi
-    if ! _cp_exists "$_n"; then
-        printf 'claude-profile: no such profile "%s"\n' "$_n" >&2
-        return 1
-    fi
+    _cp_need "$_n" || return 1
     # Confirm even though the old contents are backed up: --reset used to be an
     # alias for "default", so muscle memory aims it at a profile people meant to
     # only switch away from.
-    if [ -z "${_CP_YES:-}" ]; then
-        printf 'reset profile "%s" to a fresh ~/.claude? type the name to confirm: ' "$_n"
-        read -r _answer
-        if [ "$_answer" != "$_n" ]; then
-            printf 'cancelled\n'
-            return 1
-        fi
-    fi
+    _cp_confirm "$_n" "reset profile \"$_n\" to a fresh ~/.claude? type the name to confirm: " || return 1
     if ! _bk=$(_cp_backup "$_n"); then
         printf 'claude-profile: backup failed, not resetting "%s"\n' "$_n" >&2
         return 1
@@ -477,19 +483,12 @@ _cp_cmd_reset() {
 
 _cp_cmd_delete() {
     _n="$1"
-    _cp_exists "$_n" || { printf 'claude-profile: no such profile "%s"\n' "$_n" >&2; return 1; }
+    _cp_need "$_n" || return 1
     if [ "$(_cp_selected)" = "$_n" ]; then
         printf 'claude-profile: "%s" is active; run "claude profile default" first\n' "$_n" >&2
         return 1
     fi
-    if [ -z "${_CP_YES:-}" ]; then
-        printf 'delete profile "%s"? type the name to confirm: ' "$_n"
-        read -r _answer
-        if [ "$_answer" != "$_n" ]; then
-            printf 'cancelled\n'
-            return 1
-        fi
-    fi
+    _cp_confirm "$_n" "delete profile \"$_n\"? type the name to confirm: " || return 1
     if ! _bk=$(_cp_backup "$_n"); then
         printf 'claude-profile: backup failed, not deleting "%s"\n' "$_n" >&2
         return 1
@@ -505,9 +504,8 @@ _cp_cmd_delete() {
 
 _cp_cmd_rename() {
     _o="$1"; _n="$2"
-    _cp_exists "$_o" || { printf 'claude-profile: no such profile "%s"\n' "$_o" >&2; return 1; }
-    _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
-    _cp_exists "$_n" && { printf 'claude-profile: "%s" already exists\n' "$_n" >&2; return 1; }
+    _cp_need "$_o" || return 1
+    _cp_free "$_n" || return 1
     if ! mv "$(_cp_dir "$_o")" "$(_cp_dir "$_n")"; then
         printf 'claude-profile: rename failed\n' >&2
         return 1
@@ -526,9 +524,8 @@ _cp_cmd_rename() {
 
 _cp_cmd_copy() {
     _s="$1"; _n="$2"
-    _cp_exists "$_s" || { printf 'claude-profile: no such profile "%s"\n' "$_s" >&2; return 1; }
-    _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
-    _cp_exists "$_n" && { printf 'claude-profile: "%s" already exists\n' "$_n" >&2; return 1; }
+    _cp_need "$_s" || return 1
+    _cp_free "$_n" || return 1
     if ! _cp_build "$(_cp_dir "$_s")" "$(_cp_dir "$_n")"; then
         printf 'claude-profile: failed to copy "%s"\n' "$_s" >&2
         rm -rf "$(_cp_dir "$_n")"
@@ -578,15 +575,15 @@ PY
 
 _cp_cmd_show() {
     _n="$1"
-    _cp_exists "$_n" || { printf 'claude-profile: no such profile "%s"\n' "$_n" >&2; return 1; }
+    _cp_need "$_n" || return 1
     printf '%s\n' "$_n"
     _cp_summary "$(_cp_dir "$_n")"
 }
 
 _cp_cmd_diff() {
     _a="$1"; _b="$2"
-    _cp_exists "$_a" || { printf 'claude-profile: no such profile "%s"\n' "$_a" >&2; return 1; }
-    _cp_exists "$_b" || { printf 'claude-profile: no such profile "%s"\n' "$_b" >&2; return 1; }
+    _cp_need "$_a" || return 1
+    _cp_need "$_b" || return 1
     printf '%s\n' "$_a"
     _cp_summary "$(_cp_dir "$_a")"
     printf '%s\n' "$_b"
@@ -607,7 +604,7 @@ _cp_owned() {
 
 _cp_cmd_export() {
     _n="$1"
-    _cp_exists "$_n" || { printf 'claude-profile: no such profile "%s"\n' "$_n" >&2; return 1; }
+    _cp_need "$_n" || return 1
     _out="${2:-./$_n.tar.gz}"
     _d=$(_cp_dir "$_n")
     if [ -e "$_d/.credentials.json" ] && [ ! -L "$_d/.credentials.json" ]; then
@@ -646,8 +643,7 @@ _cp_cmd_import() {
         _n="${_n%.tar.gz}"
         _n="${_n%.tgz}"
     fi
-    _cp_valid_name "$_n" || { printf 'claude-profile: bad name "%s"\n' "$_n" >&2; return 1; }
-    _cp_exists "$_n" && { printf 'claude-profile: "%s" already exists\n' "$_n" >&2; return 1; }
+    _cp_free "$_n" || return 1
     _d=$(_cp_dir "$_n")
     mkdir -p "$_d" || return 1
     # No explicit check here against "../" or absolute members in the archive:
@@ -661,7 +657,7 @@ _cp_cmd_import() {
     # substitution output, so that's what forces per-word iteration in both.
     for _b in $(printf '%s' "$_CP_SHARED"); do
         [ -e "$HOME/.claude/$_b" ] || continue
-        rm -rf "$_d/$_b" || { rm -rf "$_d"; return 1; }
+        rm -rf "${_d:?}/$_b" || { rm -rf "$_d"; return 1; }
         ln -s "$HOME/.claude/$_b" "$_d/$_b" || { rm -rf "$_d"; return 1; }
     done
     # The archive carries the exporting machine's profile paths. Rewrite any
