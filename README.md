@@ -1,4 +1,4 @@
-# claude-profile
+# Claude Profiles
 
 Switch Claude Code between named configuration profiles — different enabled
 plugins, skills, commands, hooks, MCP servers, model and permissions per
