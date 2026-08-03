@@ -501,10 +501,11 @@ _cp_backup_statusline() {
 }
 
 # Appends a guarded, idempotent block to ~/.claude/statusline.sh that prints
-# the active profile name. The only command in this tool that writes to the
-# real ~/.claude — everything else is profile-scoped. Silent (prints nothing
-# at statusline-render time) when no profile is active, so base behaviour is
-# unchanged until someone actually switches.
+# the config the session is actually running on. The only command in this tool
+# that writes to the real ~/.claude — everything else is profile-scoped. Always
+# prints something: the profile name when one is active, "default" when the
+# session is on the base ~/.claude, so the statusline never leaves you guessing
+# which of the two you are in.
 _cp_cmd_install_statusline() {
     _f="$HOME/.claude/statusline.sh"
     if [ -f "$_f" ]; then
@@ -520,7 +521,7 @@ _cp_cmd_install_statusline() {
     fi
     {
         printf '%s\n' "$_CP_SL_START"
-        printf '[ -n "$CLAUDE_CONFIG_DIR" ] && [ "$CLAUDE_CONFIG_DIR" != "$HOME/.claude" ] && printf '"'"' · [%%s]'"'"' "${CLAUDE_CONFIG_DIR##*/}"\n'
+        printf 'if [ -z "$CLAUDE_CONFIG_DIR" ] || [ "$CLAUDE_CONFIG_DIR" = "$HOME/.claude" ]; then printf '"'"' · [default]'"'"'; else printf '"'"' · [%%s]'"'"' "${CLAUDE_CONFIG_DIR##*/}"; fi\n'
         printf '%s\n' "$_CP_SL_END"
     } >> "$_f" || { printf 'claude-profile: failed to write %s\n' "$_f" >&2; return 1; }
     chmod +x "$_f" || return 1
@@ -564,7 +565,7 @@ claude profile --diff <a> <b>        the same, for two profiles
 claude profile --export <name> [f]   write a shareable tarball (no credentials)
 claude profile --import <file> [n]   create a profile from a tarball
 
-claude profile --install-statusline    show the active profile in your statusline
+claude profile --install-statusline    show the running profile (or default) in your statusline
 claude profile --uninstall-statusline  remove it
 
 Resolution order: $CLAUDE_PROFILE, then .claude-profile walking up from the

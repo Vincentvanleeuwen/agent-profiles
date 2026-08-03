@@ -427,7 +427,12 @@ out=$(CLAUDE_CONFIG_DIR="$TMP/store/profiles/dev" sh "$FAKEHOME/.claude/statusli
 check "statusline shows profile" 'printf "%s" "$out" | grep -q "\[dev\]"'
 
 out=$(sh "$FAKEHOME/.claude/statusline.sh")
-check "statusline silent without profile" '! printf "%s" "$out" | grep -q "\["'
+check "statusline shows default when unset" 'printf "%s" "$out" | grep -q "\[default\]"'
+
+# Launching through the shell function on the base config sets CLAUDE_CONFIG_DIR
+# to ~/.claude explicitly; that is still "default", not a profile named .claude.
+out=$(CLAUDE_CONFIG_DIR="$FAKEHOME/.claude" sh "$FAKEHOME/.claude/statusline.sh")
+check "statusline shows default for base dir" 'printf "%s" "$out" | grep -q "\[default\]"'
 
 _cp_main --uninstall-statusline >/dev/null
 check "block removed"      '! grep -q "CLAUDE_PROFILE_BLOCK" "$FAKEHOME/.claude/statusline.sh"'

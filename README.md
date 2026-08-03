@@ -42,7 +42,7 @@ plain `~/.claude`.
 | `claude profile --diff <a> <b>` | The same, side by side |
 | `claude profile --export <name> [file]` | Shareable tarball, excludes `.credentials.json` (see Security notes) |
 | `claude profile --import <file> [name]` | Create a profile from a tarball |
-| `claude profile --install-statusline` | Show the active profile in your statusline |
+| `claude profile --install-statusline` | Show the running profile (or `default`) in your statusline |
 | `claude profile --uninstall-statusline` | Remove it |
 
 ## Which profile am I in?
@@ -124,6 +124,11 @@ cp -R <store>/.backups/<name>-<timestamp> <store>/profiles/<name>
 which is exactly why the status output names it rather than making you guess.
 
 ## Statusline
+
+The block appends ` · [<name>]` to your statusline, naming the config the
+session is actually running on: the profile name when one is active, and
+`[default]` when you are on the base `~/.claude`. It always prints — a blank
+statusline would be ambiguous between "on base" and "block not installed".
 
 `--install-statusline` edits `~/.claude/statusline.sh` (base), not any
 existing profile. Profiles created *after* installing inherit the block
