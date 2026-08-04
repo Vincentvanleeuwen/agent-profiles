@@ -31,7 +31,8 @@ the same `install.sh` under the hood. Set `CLAUDE_PROFILE_INSTALL_DIR` to put
 the code somewhere else; `install.sh` refuses to run, before touching
 anything, if that resolves to `/`, to `$HOME` itself, or to an ancestor of
 `$HOME` — it gets `rm -rf`'d on `--uninstall`, and any of those would make
-that catastrophic.
+that catastrophic. It also refuses early, before anything is touched, if
+`$HOME` itself does not resolve to a real directory.
 
 On Windows, npm's postinstall cannot yet run the unmigrated `install.ps1` and
 prints a message telling you to clone the repo and run it yourself instead.
@@ -41,8 +42,7 @@ See [Windows](#windows).
 `~/.bash_profile` — whichever your shell actually reads, which differs between
 macOS, Linux and Git Bash — then starts real shells, login and non-login, and
 looks at what `claude` resolves to in each, because a line in a file is not an
-install. Re-running it is a no-op. It fails early, before touching anything,
-if `$HOME` does not resolve to a real directory.
+install. Re-running it is a no-op.
 
 Bash is the awkward one. It reads `~/.bashrc` for interactive non-login shells
 and the first of `~/.bash_profile`, `~/.bash_login` or `~/.profile` for login
