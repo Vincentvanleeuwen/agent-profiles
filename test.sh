@@ -1327,5 +1327,36 @@ check "shim is executable"      '[ -x "$HERE/bin/claude" ]'
 check "shim has no CR bytes"    '! grep -q "$(printf "\r")" "$HERE/bin/claude"'
 check_with "shim parses under dash" dash 'dash -n "$HERE/bin/claude"'
 
+echo "== Task 20: npm packaging =="
+
+check_with "package.json is valid JSON" node \
+   'node -e "JSON.parse(require(\"fs\").readFileSync(\"$HERE/package.json\",\"utf8\"))"'
+check_with "package ships the code, not the store" node \
+   'node -e "
+      const f = JSON.parse(require(\"fs\").readFileSync(\"$HERE/package.json\",\"utf8\")).files;
+      const need = [\"claude-profile.sh\",\"lib\",\"bin\",\"claude-profile.psm1\",\"install.sh\",\"install.ps1\"];
+      for (const n of need) if (!f.includes(n)) { console.error(\"missing \"+n); process.exit(1); }
+      for (const n of [\"profiles\",\"exports\",\".backups\"]) if (f.includes(n)) { console.error(\"ships \"+n); process.exit(1); }
+   "'
+check_with "postinstall is wired to the dispatcher" node \
+   'node -e "
+      const p = JSON.parse(require(\"fs\").readFileSync(\"$HERE/package.json\",\"utf8\"));
+      if (!/postinstall\.mjs/.test(p.scripts.postinstall)) process.exit(1);
+   "'
+
+# npmhome stands in for a real $HOME so the dispatcher's install.sh has
+# somewhere to `cd`. Every var the installer reads is pinned here rather than
+# inherited: CLAUDE_PROFILES_DIR is exported suite-wide above and has already
+# broken three tests this way, and --no-migrate stops migrate_clone_store from
+# ever touching $HERE/profiles, the live store of the session running this.
+mkdir -p "$TMP/npmhome"
+check_with "dispatcher runs the POSIX installer" node \
+   'env HOME="$TMP/npmhome" CLAUDE_PROFILES_DIR="$TMP/npmhome/.claude-profiles" \
+        CP_RC="$TMP/npmhome/.zshrc" CP_ZSHENV="$TMP/npmhome/.zshenv" \
+        CP_LINK_DIR="$TMP/npmhome/.local/bin" \
+        CLAUDE_PROFILE_INSTALL_DIR="$TMP/npmhome/.claude-profile" SHELL=/bin/zsh \
+        node "$HERE/scripts/postinstall.mjs" --no-migrate >/dev/null 2>&1 &&
+    [ -f "$TMP/npmhome/.claude-profile/claude-profile.sh" ]'
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
