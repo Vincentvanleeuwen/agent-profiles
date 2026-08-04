@@ -115,5 +115,9 @@ _cp_migrate_rewrite() {
         printf 'rewrote %s\n' "$_mr_rel"
         _mr_rewrote=1
     done
-    [ "$_mr_rewrote" = 1 ] && printf 'backups in %s\n' "$_mr_backup"
+    # `&&` here would leak its own pass/fail as this function's return value
+    # once nothing follows it -- `if` always returns 0 regardless of the branch.
+    if [ "$_mr_rewrote" = 1 ]; then
+        printf 'backups in %s\n' "$_mr_backup"
+    fi
 }

@@ -938,6 +938,25 @@ check "migrated settings were rewritten" \
    'grep -q "$IH4/.claude-profiles/profiles/legacyprof/statusline.sh" \
       "$IH4/.claude-profiles/profiles/legacyprof/settings.json"'
 
+# A clone whose profile has nothing baked in (no settings.json referencing
+# the old path) must still install cleanly -- migrate_clone_store's die
+# message says the opposite of the truth when nothing needed rewriting.
+IH4B="$TMP/ihome-migrate-norewrite"
+CLONEB="$TMP/oldclone-norewrite"
+mkdir -p "$IH4B" "$CLONEB/profiles/legacyprof"
+cp "$HERE/claude-profile.sh" "$HERE/install.sh" "$CLONEB/"
+cp -R "$HERE/lib" "$HERE/bin" "$CLONEB/"
+printf 'just some notes\n' > "$CLONEB/profiles/legacyprof/CLAUDE.md"
+env HOME="$IH4B" SHELL=/bin/zsh CP_RC="$IH4B/.zshrc" CP_ZSHENV="$IH4B/.zshenv" \
+    CP_LINK_DIR="$IH4B/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH4B/.claude-profile" \
+    CLAUDE_PROFILES_DIR="$IH4B/.claude-profiles" \
+    sh "$CLONEB/install.sh" --from-npm >"$TMP/norewrite-installout" 2>&1
+eq "install with nothing to rewrite exits 0" "$?" "0"
+check "install with nothing to rewrite does not claim the store was not migrated" \
+   '! grep -q "was not migrated" "$TMP/norewrite-installout"'
+check "install with nothing to rewrite still migrated the clone" \
+   '[ -d "$IH4B/.claude-profiles/profiles/legacyprof" ]'
+
 # Every existing user has a line pointing at their old clone. Repoint it
 # rather than refuse -- leaving them with no path forward is worse.
 CONFLICT_ENV="CP_RC=$TMP/conflictrc CLAUDE_PROFILE_INSTALL_DIR=$TMP/conflict-install CP_LINK_DIR=$TMP/conflict-install/.local/bin CP_ZSHENV=$TMP/conflict-install/.zshenv"
@@ -1282,6 +1301,17 @@ check "metacharacter path settings.json still gets rewritten" \
    'grep -q "$NEWX/profiles/dev/statusline.sh" "$NEWX/profiles/dev/settings.json"'
 check "metacharacter path leaves no leftover old reference" \
    '! grep -Fq "$LEGX" "$NEWX/profiles/dev/settings.json"'
+
+# A profile with nothing baked-in to rewrite is the common case, not the
+# exception -- this must still exit 0, not leak the trailing `[ cond ] &&
+# printf` guard's own false test as the whole function's return value.
+LEGNR="$TMP/legacy_norewrite"
+NEWNR="$TMP/newstore_norewrite"
+mkdir -p "$LEGNR/profiles/dev"
+printf 'just some notes\n' > "$LEGNR/profiles/dev/CLAUDE.md"
+out6=$(CLAUDE_PROFILES_DIR="$NEWNR"; _cp_migrate_store "$LEGNR" 2>&1)
+eq "migration with nothing to rewrite still exits 0" "$?" "0"
+check "migration with nothing to rewrite still moved profiles" '[ -d "$NEWNR/profiles/dev" ]'
 
 check "executed --migrate-store is wired up" \
    'env HOME="$FAKEHOME" CLAUDE_PROFILES_DIR="$TMP/store4" "$CPX" --migrate-store 2>&1 |
