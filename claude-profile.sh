@@ -54,10 +54,8 @@ _CP_HOME=$(cd "$(dirname "$_CP_SELF")" && pwd)
 # Directory holding this file with symlinks resolved, so lib/ is still findable
 # when claude-profile.sh is symlinked into a dotfiles repo or ~/bin.
 #
-# Deliberately not folded into _CP_HOME above: _CP_HOME is also the default
-# profile store, so resolving symlinks there would silently relocate the
-# profiles of anyone already installed that way. readlink -f would be shorter
-# but is not portable; this loop is.
+# Computed separately using a portable loop rather than readlink -f,
+# so it stays available when the script is symlinked.
 _cp_libdir() {
     _ld_p="$1"
     while [ -L "$_ld_p" ]; do

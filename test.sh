@@ -68,6 +68,9 @@ echo "== Task 1: resolution =="
 
 eq "store honours CLAUDE_PROFILES_DIR" "$(_cp_store)" "$TMP/store"
 
+got=$(unset CLAUDE_PROFILES_DIR; _cp_store)
+eq "store defaults under HOME" "$got" "$FAKEHOME/.claude-profiles"
+
 mkdir -p "$TMP/store/profiles/dev"
 printf 'dev\n' > "$TMP/store/active"
 eq "active file selects profile" "$(_cp_selected)" "dev"

@@ -8,7 +8,7 @@ _cp_store() {
     if [ -n "${CLAUDE_PROFILES_DIR:-}" ]; then
         printf '%s' "$CLAUDE_PROFILES_DIR"
     else
-        printf '%s' "$_CP_HOME"
+        printf '%s' "$HOME/.claude-profiles"
     fi
 }
 
