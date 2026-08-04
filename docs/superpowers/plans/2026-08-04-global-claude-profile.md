@@ -123,9 +123,12 @@ got=$(
 )
 eq "resolver skips our own shim" "$got" "$TMP/realbin/claude"
 
+# /usr/bin:/bin stays on PATH here because _cp_deref shells out to readlink and
+# dirname, which are not builtins -- without them the symlink is never resolved.
+# Neither directory contains a claude, so the assertion still proves the skip.
 got=$(
     CLAUDE_PROFILE_INSTALL_DIR="$TMP/fakeinstall"
-    PATH="$TMP/earlybin:$TMP/realbin"
+    PATH="$TMP/earlybin:$TMP/realbin:/usr/bin:/bin"
     _cp_real_claude
 )
 eq "resolver skips a symlink into the install dir" "$got" "$TMP/realbin/claude"
