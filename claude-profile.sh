@@ -49,13 +49,10 @@ else
             _CP_EXEC=1 ;;
     esac
 fi
-_CP_HOME=$(cd "$(dirname "$_CP_SELF")" && pwd)
 
 # Directory holding this file with symlinks resolved, so lib/ is still findable
 # when claude-profile.sh is symlinked into a dotfiles repo or ~/bin.
-#
-# Computed separately using a portable loop rather than readlink -f,
-# so it stays available when the script is symlinked.
+# readlink -f would be shorter but is not portable; this loop is.
 _cp_libdir() {
     _ld_p="$1"
     while [ -L "$_ld_p" ]; do

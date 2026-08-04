@@ -62,9 +62,8 @@ function Get-CpBaseDir {
 # E:\Codeshit\x -> /e/Codeshit/x
 #
 # Done here rather than left to MSYS's own argument heuristics, which apply to
-# some positions and not others. Note the consequence: bash resolves _CP_HOME to
-# /e/Codeshit/claude-profiles while PowerShell calls the same directory
-# E:\Codeshit\claude-profiles. One store, two spellings, no divergence.
+# some positions and not others. Bash and PowerShell see the same store path
+# with different path syntax, and this conversion keeps them in sync.
 function ConvertTo-CpPosixPath {
     param([string]$Path)
     if ([string]::IsNullOrEmpty($Path)) { return $Path }
