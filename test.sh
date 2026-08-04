@@ -1357,5 +1357,23 @@ check_with "dispatcher runs the POSIX installer" node \
     [ -L "$TMP/npmhome/.claude-profile/bin/claude-profile" ] &&
     [ -L "$TMP/npmhome/.local/bin/claude-profile" ] && [ -e "$TMP/npmhome/.local/bin/claude-profile" ]'
 
+# npm strips symlinks from tarballs, so the repair only matters when the source
+# tree lacks bin/claude-profile — reproduce that, or the test proves nothing.
+SRC="$TMP/npmsrc"
+mkdir -p "$SRC"
+cp "$HERE/claude-profile.sh" "$HERE/install.sh" "$SRC/"
+cp -R "$HERE/lib" "$HERE/bin" "$HERE/scripts" "$SRC/"
+rm -f "$SRC/bin/claude-profile"
+mkdir -p "$TMP/npmhome2"
+check_with "dispatcher repairs a symlink-stripped npm source" node \
+   'env HOME="$TMP/npmhome2" CLAUDE_PROFILES_DIR="$TMP/npmhome2/.claude-profiles" \
+        CP_RC="$TMP/npmhome2/.zshrc" CP_ZSHENV="$TMP/npmhome2/.zshenv" \
+        CP_LINK_DIR="$TMP/npmhome2/.local/bin" \
+        CLAUDE_PROFILE_INSTALL_DIR="$TMP/npmhome2/.claude-profile" SHELL=/bin/zsh \
+        node "$TMP/npmsrc/scripts/postinstall.mjs" --no-migrate >/dev/null 2>&1 &&
+    [ -f "$TMP/npmhome2/.claude-profile/claude-profile.sh" ] &&
+    [ -L "$TMP/npmhome2/.claude-profile/bin/claude-profile" ] &&
+    [ -L "$TMP/npmhome2/.local/bin/claude-profile" ] && [ -e "$TMP/npmhome2/.local/bin/claude-profile" ]'
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
