@@ -10,18 +10,39 @@ natively, so switching is just pointing it somewhere else.
 ## Install
 
 ```sh
+npm i -g claude-profiles
+```
+
+or, from a clone:
+
+```sh
 git clone <this repo> ~/claude-profiles
 ~/claude-profiles/install.sh
 ```
 
-On Windows, run `.\install.ps1` from PowerShell instead — or as well, if you use
-both PowerShell and Git Bash. See [Windows](#windows).
+Either way you end up with two things on PATH: `claude-profile`, a new
+command, and a `claude` wrapper that intercepts `claude profile ...` before it
+reaches the real binary. Both are copied into a stable `~/.claude-profile`
+(singular — a different directory from where your profiles themselves live,
+see [Where the data lives](#where-the-data-lives)), so nothing on PATH or in
+any rc file points into an npm/nvm prefix: changing your node version cannot
+break an existing install. npm is delivery only — its postinstall just runs
+the same `install.sh` under the hood. Set `CLAUDE_PROFILE_INSTALL_DIR` to put
+the code somewhere else; `install.sh` refuses to run, before touching
+anything, if that resolves to `/`, to `$HOME` itself, or to an ancestor of
+`$HOME` — it gets `rm -rf`'d on `--uninstall`, and any of those would make
+that catastrophic.
+
+On Windows, npm's postinstall cannot yet run the unmigrated `install.ps1` and
+prints a message telling you to clone the repo and run it yourself instead.
+See [Windows](#windows).
 
 `install.sh` adds the `source` line to your `~/.zshrc`, `~/.bashrc` or
 `~/.bash_profile` — whichever your shell actually reads, which differs between
 macOS, Linux and Git Bash — then starts real shells, login and non-login, and
 looks at what `claude` resolves to in each, because a line in a file is not an
-install. Re-running it is a no-op.
+install. Re-running it is a no-op. It fails early, before touching anything,
+if `$HOME` does not resolve to a real directory.
 
 Bash is the awkward one. It reads `~/.bashrc` for interactive non-login shells
 and the first of `~/.bash_profile`, `~/.bash_login` or `~/.profile` for login
@@ -43,8 +64,9 @@ rather than guessing:
 ./install.sh --rc ~/.profile   # or name the file outright
 ```
 
-An existing line pointing at a different clone also stops it. Nothing gets
-edited in either case.
+An existing line pointing at a different clone gets rewritten to point at the
+stable install instead — see [Moving off an old
+clone](#moving-off-an-old-clone) below for what else that involves.
 
 Start a new shell, then snapshot your current setup:
 
@@ -55,6 +77,62 @@ claude profile development
 
 `claude` now runs with that profile. `claude profile default` goes back to
 plain `~/.claude`.
+
+### Two ways to run it
+
+`claude-profile <name>` and `claude profile <name>` do the same thing, but
+they're reached differently, and that difference is the whole reason both
+exist:
+
+| context | `claude-profile <name>` | `claude profile <name>` |
+|---|---|---|
+| interactive zsh | yes, symlink on PATH | yes, shell function |
+| `zsh -c`, zsh scripts, Claude Code's own Bash tool | yes | yes, via `.zshenv` |
+| `bash -c` | yes | no — would need `BASH_ENV`, out of scope |
+| `sh -c`, cron, GUI-launched apps | yes | no |
+
+`claude-profile` is a plain symlink in `~/.local/bin`, a directory every one
+of those contexts inherits on PATH, so it is the one that always works.
+`claude profile` only exists where something has actually defined the
+`claude` wrapper: the shell function sourced into an interactive zsh, or a
+standalone shim reached through the `.zshenv` PATH prepend in a
+non-interactive one. Neither reaches `bash -c`, `sh -c`, cron or a
+GUI-launched tool on macOS or Linux — `claude-profile` is the answer there.
+Pass `--no-shim` to skip installing the standalone wrapper if you only want
+`claude-profile` on PATH; you still get the `claude` shell function in
+interactive zsh either way, since that comes from sourcing your rc, not from
+the shim.
+
+### Moving off an old clone
+
+Profiles used to live inside the clone itself, at
+`~/claude-profiles/profiles/`. They now default to `~/.claude-profiles`
+(plural, outside any clone — see [Where the data
+lives](#where-the-data-lives)), so moving to this version needs a one-time
+migration:
+
+```sh
+claude-profile --migrate-store ~/claude-profiles
+```
+
+This moves `profiles/`, `active`, `exports/`, `.backups/` and
+`prompt-state.json` out of the old clone and rewrites the absolute paths a
+profile bakes into its own `settings.json`, `settings.local.json`,
+`statusline.sh` and hooks so they still point at the right place;
+`.claude.json` and `teams/*/config.json` are left alone, since those hold
+project history for the clone directory, which still exists.
+`install.sh`, run from a clone that still has its own `profiles/` directory,
+does this automatically — pass `--no-migrate` to skip it.
+
+**A migration with nothing to rewrite still exits 1.** If none of your
+profiles have an absolute clone path baked into `settings.json` — true for
+anything only ever `--create`d and never customized — the files move
+correctly, but the command's own `store is now ...` success line never
+prints, and if `install.sh` triggered it automatically you'll see the
+worrying `the code is installed but the store was not migrated` message even
+though it was. Check `~/.claude-profiles/profiles/` (or your
+`CLAUDE_PROFILES_DIR`) before re-running anything by hand — the data has
+already moved.
 
 ### Without installing
 
@@ -90,9 +168,16 @@ function:
 .\install.ps1
 ```
 
-Both can be installed at once, and should be if you use both. They share one
-store, so a profile created in either is visible in both and `claude profile
-<name>` in one switches the other.
+Both can be installed at once, and should be if you use both. They are meant
+to share one store, so that a profile created in either is visible in both —
+but that is **not currently true**. Only the Git Bash / `install.sh` half
+defaults to `~/.claude-profiles`; `install.ps1`'s store still defaults to its
+own module directory. Left on defaults, the two halves read two different
+stores and `claude profile` lists different profiles depending on which one
+you're in. Until the PowerShell half is migrated too, set
+`CLAUDE_PROFILES_DIR` explicitly, to the same path, for both — and install
+from a git clone with `install.ps1`; `npm i -g claude-profiles` on Windows
+does not run it (see [Install](#install)).
 
 `install.ps1` edits `$PROFILE`, checks that a fresh PowerShell really does end
 up with `claude` as a function, and warns if your execution policy is
@@ -127,8 +212,7 @@ executable with a function. **WSL is a separate installation** — its `$HOME` a
 filesystem are its own, so clone the repo inside WSL and run `install.sh` there
 if you want profiles in WSL too.
 
-Uninstalling is the mirror image: delete the `Import-Module` line from
-`$PROFILE`, and the `source` line from your shell rc.
+See [Uninstall](#uninstall) for removing either half.
 
 ## Commands
 
@@ -179,12 +263,16 @@ and the runtime directories.
 
 ## Where the data lives
 
-Profiles live in `profiles/` inside this clone, with the active profile name in
-`active` and pre-update snapshots in `.backups/`. **All three are in
-`.gitignore` and must stay there.** A profile's `settings.json` can hold
-environment variables and API keys — that's the whole reason they're
-gitignored, not an oversight, so don't "fix" it. Set `CLAUDE_PROFILES_DIR` to
-keep them elsewhere.
+Profiles live in `~/.claude-profiles` by default — outside any clone, so a
+clone can be deleted or moved without losing them. `profiles/` holds the
+profiles themselves, `active` the active profile name, `.backups/` the
+pre-update snapshots. Set `CLAUDE_PROFILES_DIR` to put the store somewhere
+else instead. If you point it at a git-tracked directory anyway — including
+this clone's own, pre-migration — `profiles/`, `active`, `.backups/`,
+`exports/` and `prompt-state.json` are all in this repo's `.gitignore`, so a
+profile's `settings.json` and any API keys in it were never at risk of being
+committed. Upgrading from a version that kept `profiles/` inside the clone?
+See [Moving off an old clone](#moving-off-an-old-clone).
 
 `.backups/` has no retention policy — nothing prunes it automatically. On a
 long-lived install it grows without bound; clear old entries by hand if that
@@ -226,7 +314,7 @@ rm -rf <store>/profiles/<name>                # or wherever it landed
 cp -R <store>/.backups/<name>-<timestamp> <store>/profiles/<name>
 ```
 
-`<store>` is `~/claude-profiles` by default, or `$CLAUDE_PROFILES_DIR` if you set it —
+`<store>` is `~/.claude-profiles` by default, or `$CLAUDE_PROFILES_DIR` if you set it —
 which is exactly why the status output names it rather than making you guess.
 
 ## Statusline
@@ -244,11 +332,19 @@ up the block same as any other change.
 
 ## Uninstall
 
-Remove the `source` line from your shell rc and the `Import-Module` line from
-`$PROFILE` if you installed the PowerShell side, run
-`claude profile --uninstall-statusline` if you installed it, and delete the
-clone. `~/.claude` is untouched throughout — this tool never writes to it,
-except for the opt-in statusline block.
+Run `claude profile --uninstall-statusline` first if you installed that, then
+`./install.sh --uninstall` from the clone. It removes the rc source line, the
+`.zshenv` PATH block, the `claude-profile` symlink, and the install directory
+(`~/.claude-profile` by default), and prints where your profile store still
+lives — nothing under it is touched. Installed via npm? Use
+`claude-profile-install --uninstall` instead — it runs the same `install.sh`,
+kept inside the npm package after a git clone would be gone.
+
+There's no equivalent on the PowerShell side yet: remove the `Import-Module`
+line from `$PROFILE` and the `source` line from your shell rc by hand.
+
+`~/.claude` is untouched throughout — this tool never writes to it, except
+for the opt-in statusline block.
 
 ## Requirements
 
