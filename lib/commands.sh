@@ -63,12 +63,14 @@ _CP_RUNNER=${_CP_RUNNER:-}
 # Skips anything inside the install dir so `command claude` cannot loop back into our own shim.
 _cp_real_claude() {
     _rc_skip=$(_cp_install_dir)
-    _rc_ifs=$IFS
-    IFS=:
-    # shellcheck disable=SC2086 # splitting PATH on colons is the point
-    set -- $PATH
-    IFS=$_rc_ifs
-    for _rc_d in "$@"; do
+    # Split PATH on ':' by hand: zsh does not word-split unquoted $PATH, so
+    # `set -- $PATH` would hand us the whole string as one element.
+    _rc_rest=$PATH
+    while [ -n "$_rc_rest" ]; do
+        case "$_rc_rest" in
+            *:*) _rc_d=${_rc_rest%%:*}; _rc_rest=${_rc_rest#*:} ;;
+            *)   _rc_d=$_rc_rest; _rc_rest= ;;
+        esac
         [ -n "$_rc_d" ] || _rc_d=.
         [ -f "$_rc_d/claude" ] && [ -x "$_rc_d/claude" ] || continue
         case "$(_cp_deref "$_rc_d/claude")" in
