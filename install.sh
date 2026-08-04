@@ -230,14 +230,14 @@ if [ ! -f "$rc" ]; then
     say "created $rc"
 fi
 
-# Drop our block and any line matching a pattern, leaving the rest of the
-# file byte-for-byte. No sed -i: it is not POSIX.
+# Drop lines matching an extended-regex pattern, leaving the rest of the file
+# byte-for-byte. No sed -i: it is not POSIX.
 drop_lines() {
     _f="$1"
     _pat="$2"
     [ -f "$_f" ] || return 0
     _t="$_f.cp-tmp.$$"
-    grep -v "$_pat" "$_f" > "$_t"
+    grep -vE "$_pat" "$_f" > "$_t"
     _gs=$?
     # grep exits 1 when the pattern matched every line, leaving the file
     # empty — that's normal here, not a failure. Anything past 1 is a real error.
@@ -245,15 +245,40 @@ drop_lines() {
     mv "$_t" "$_f" || { rm -f "$_t"; die "could not rewrite $_f"; }
 }
 
+# Drops the PATH block add_zshenv_path wrote: the marker plus the two lines
+# after it. Anchored on the marker, not on BIN_DIR, so a CLAUDE_PROFILE_INSTALL_DIR
+# without "claude-profile" in its name still gets fully reversed.
+drop_zshenv_block() {
+    _f="$1"
+    [ -f "$_f" ] || return 0
+    _t="$_f.cp-tmp.$$"
+    # add_zshenv_path always writes a blank separator line right before the
+    # marker, so drop that too — hold each line back by one print so we know
+    # whether it turned out to be that separator before deciding to print it.
+    awk -v mark="$ZSHENV_MARK" '
+        skip > 0    { skip--; next }
+        $0 == mark  { skip = 2; have = 0; next }
+        have        { print buf }
+        { buf = $0; have = 1 }
+        END { if (have) print buf }
+    ' "$_f" > "$_t" || { rm -f "$_t"; die "could not rewrite $_f"; }
+    mv "$_t" "$_f" || { rm -f "$_t"; die "could not rewrite $_f"; }
+}
+
 # rm -rf "$INSTALL_DIR" needs no extra guard: the canonicalising check at the
 # top of this file already refused /, $HOME and its ancestors before any flag ran.
 if [ -n "$uninstall" ]; then
-    drop_lines "$rc" 'claude-profile\.sh'
+    drop_lines "$rc" '^[[:space:]]*(\.|source)[[:space:]].*claude-profile\.sh'
     drop_lines "$rc" '^# claude-profile — added by install.sh$'
-    drop_lines "$ZSHENV" 'claude-profile'
-    rm -f "$LINK_DIR/claude-profile"
+    drop_zshenv_block "$ZSHENV"
+    # Only remove the symlink if it is actually ours: a foreign file or link
+    # at the same path is the user's, not something uninstall gets to touch.
+    case "$(readlink "$LINK_DIR/claude-profile" 2>/dev/null)" in
+        "$BIN_DIR"/*) rm -f "$LINK_DIR/claude-profile" ;;
+        *) [ -e "$LINK_DIR/claude-profile" ] && say "left $LINK_DIR/claude-profile alone: not ours" ;;
+    esac
     rm -rf "$INSTALL_DIR"
-    say "removed $INSTALL_DIR, the PATH line, the rc line and the symlink"
+    say "removed $INSTALL_DIR, the PATH line and the rc line"
     say ""
     say "Your profiles were not touched:"
     say ""

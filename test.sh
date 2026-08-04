@@ -1077,7 +1077,7 @@ mkdir -p "$IH12/.claude-profiles/profiles/keepme"
 : > "$IH12/.claude-profiles/profiles/keepme/marker"
 
 # shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
-env $UENV sh "$HERE/install.sh" --uninstall >"$TMP/uninstout" 2>&1
+env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >"$TMP/uninstout" 2>&1
 eq "uninstall succeeds" "$?" "0"
 check "install dir removed"       '[ ! -e "$IH12/.claude-profile" ]'
 check "symlink removed"           '[ ! -e "$IH12/.local/bin/claude-profile" ]'
@@ -1087,8 +1087,61 @@ check "store left alone"          '[ -f "$IH12/.claude-profiles/profiles/keepme/
 check "uninstall names the store" 'grep -qF "$IH12/.claude-profiles" "$TMP/uninstout"'
 
 # shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
-env $UENV sh "$HERE/install.sh" --uninstall >/dev/null 2>&1
+env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >/dev/null 2>&1
 eq "uninstall is idempotent" "$?" "0"
+
+# --uninstall must not remove a foreign file at the symlink path: only a
+# symlink resolving into this tool's own bin dir is ours to delete.
+IH13="$TMP/ihome-uninstall-foreign"
+mkdir -p "$IH13"
+UENV="HOME=$IH13 SHELL=/bin/zsh CP_RC=$IH13/.zshrc CP_ZSHENV=$IH13/.zshenv"
+UENV="$UENV CP_LINK_DIR=$IH13/.local/bin CLAUDE_PROFILE_INSTALL_DIR=$IH13/.claude-profile"
+UENV="$UENV CLAUDE_PROFILES_DIR=$IH13/.claude-profiles"
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
+rm -f "$IH13/.local/bin/claude-profile"
+echo "not ours" > "$IH13/.local/bin/claude-profile"
+
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >"$TMP/uninstout13" 2>&1
+eq "uninstall (foreign file) succeeds" "$?" "0"
+check "foreign file at symlink path survives" '[ -f "$IH13/.local/bin/claude-profile" ]'
+check "foreign file content untouched"        'grep -qF "not ours" "$IH13/.local/bin/claude-profile"'
+check "install dir still removed"             '[ ! -e "$IH13/.claude-profile" ]'
+check "uninstall warns it left the file alone" 'grep -qF "left $IH13/.local/bin/claude-profile alone" "$TMP/uninstout13"'
+
+# --uninstall must only remove its own source line, never a user comment
+# that merely mentions claude-profile.sh.
+IH14="$TMP/ihome-uninstall-comment"
+mkdir -p "$IH14"
+UENV="HOME=$IH14 SHELL=/bin/zsh CP_RC=$IH14/.zshrc CP_ZSHENV=$IH14/.zshenv"
+UENV="$UENV CP_LINK_DIR=$IH14/.local/bin CLAUDE_PROFILE_INSTALL_DIR=$IH14/.claude-profile"
+UENV="$UENV CLAUDE_PROFILES_DIR=$IH14/.claude-profiles"
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
+echo "# reminder: claude-profile.sh lives in ~/.claude-profile" >> "$IH14/.zshrc"
+
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >/dev/null 2>&1
+eq "uninstall (user comment) succeeds" "$?" "0"
+check "user comment survives" 'grep -qF "reminder: claude-profile.sh" "$IH14/.zshrc"'
+check "real source line gone" '! grep -qE "^[[:space:]]*(\.|source)[[:space:]].*claude-profile\.sh" "$IH14/.zshrc"'
+
+# --uninstall must fully reverse .zshenv even when CLAUDE_PROFILE_INSTALL_DIR's
+# name has no "claude-profile" substring for a plain grep to latch onto.
+IH15="$TMP/ihome-uninstall-customdir"
+mkdir -p "$IH15"
+UENV="HOME=$IH15 SHELL=/bin/zsh CP_RC=$IH15/.zshrc CP_ZSHENV=$IH15/.zshenv"
+UENV="$UENV CP_LINK_DIR=$IH15/.local/bin CLAUDE_PROFILE_INSTALL_DIR=$IH15/.mytool"
+UENV="$UENV CLAUDE_PROFILES_DIR=$IH15/.claude-profiles"
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
+check "zshenv got the PATH block" 'grep -qF "$IH15/.mytool/bin" "$IH15/.zshenv"'
+
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >/dev/null 2>&1
+eq "uninstall (custom install dir) succeeds" "$?" "0"
+check "zshenv has no leftover PATH block" '[ ! -s "$IH15/.zshenv" ]'
 
 # Canary: every install.sh invocation above ran with SELF_DIR pointed at this
 # repo. If migrate_clone_store ever fires without --no-migrate honoring it,
