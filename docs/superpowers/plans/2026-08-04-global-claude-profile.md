@@ -470,9 +470,12 @@ chmod +x "$TMP/fakerunner"
 env $XENV "$CPX" --create shimprof >/dev/null
 printf 'shimprof\n' > "$TMP/xstore/active"
 
-check "bin/claude-profile is a symlink to the entry script" \
-   '[ -L "$HERE/bin/claude-profile" ] &&
-    [ "$(_cp_deref "$HERE/bin/claude-profile")" = "$HERE/claude-profile.sh" ]'
+check "bin/claude-profile is a symlink" '[ -L "$HERE/bin/claude-profile" ]'
+# Assert the link text, not a dereferenced path: _cp_deref resolves a relative
+# link against its own directory, so it returns "<repo>/bin/../claude-profile.sh"
+# -- correct, and never string-equal to "<repo>/claude-profile.sh".
+eq "bin/claude-profile points at the entry script" \
+   "$(readlink "$HERE/bin/claude-profile")" "../claude-profile.sh"
 check "symlinked entry still finds lib" \
    'env $XENV "$HERE/bin/claude-profile" | grep -q "^store: "'
 
