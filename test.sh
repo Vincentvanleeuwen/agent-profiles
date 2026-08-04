@@ -931,9 +931,7 @@ rm -rf "$TMP/xstore"
 
 echo "== Task 17: real claude discovery =="
 
-# Task 5 puts a script named claude on PATH. `command claude` would resolve to
-# it and recurse, so the resolver has to skip anything inside the install dir --
-# including a symlink that only points there.
+# Task 5 puts a script named claude on PATH; guards against the resolver looping back into it.
 mkdir -p "$TMP/fakeinstall/bin" "$TMP/realbin" "$TMP/earlybin"
 printf '#!/bin/sh\nprintf shim\n' > "$TMP/fakeinstall/bin/claude"
 printf '#!/bin/sh\nprintf real\n' > "$TMP/realbin/claude"
@@ -949,8 +947,8 @@ eq "resolver skips our own shim" "$got" "$TMP/realbin/claude"
 
 got=$(
     CLAUDE_PROFILE_INSTALL_DIR="$TMP/fakeinstall"
-    # /usr/bin:/bin stay on PATH so _cp_deref can still shell out to readlink
-    # and dirname -- neither has a claude binary, so the assertion is unaffected.
+    # /usr/bin:/bin stay on PATH so _cp_deref can shell out to readlink/dirname;
+    # checked neither holds a claude, and realbin/claude wins on PATH order regardless.
     PATH="$TMP/earlybin:$TMP/realbin:/usr/bin:/bin"
     _cp_real_claude
 )

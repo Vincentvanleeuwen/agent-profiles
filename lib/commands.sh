@@ -60,9 +60,7 @@ _cp_cmd_status() {
 
 _CP_RUNNER=${_CP_RUNNER:-}
 
-# A shim named claude sits ahead of the real binary on PATH once installed, so
-# `command claude` would resolve back to us and loop. Walk PATH by hand and skip
-# anything that resolves inside the install dir.
+# Skips anything inside the install dir so `command claude` cannot loop back into our own shim.
 _cp_real_claude() {
     _rc_skip=$(_cp_install_dir)
     _rc_ifs=$IFS

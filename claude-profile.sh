@@ -50,11 +50,7 @@ else
     esac
 fi
 
-# Resolves a path's symlink chain fully, so lib/ is still findable when
-# claude-profile.sh is symlinked into a dotfiles repo or ~/bin, and so the
-# real-claude resolver in lib/commands.sh can tell a shim from the binary
-# it points at. readlink -f would be shorter but is not portable; this loop
-# is. Stays here rather than in lib/: it runs before lib/ has been located.
+# readlink -f would be shorter but is not portable; this loop is.
 _cp_deref() {
     _dr_p="$1"
     while [ -L "$_dr_p" ]; do
