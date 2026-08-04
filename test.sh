@@ -1001,9 +1001,25 @@ check "migration reports what it rewrote" 'echo "$out" | grep -q "settings.json"
 check "rewritten hook keeps its executable bit" '[ -x "$NEW/profiles/dev/hooks/h.sh" ]'
 check "rewritten settings.json stays non-executable" '[ ! -x "$NEW/profiles/dev/settings.json" ]'
 
-# Second run must refuse rather than merge two stores into one.
-(CLAUDE_PROFILES_DIR="$NEW"; _cp_migrate_store "$LEG" >/dev/null 2>&1)
-eq "migration refuses a non-empty store" "$?" "1"
+# Retrying against the now-drained legacy dir must not say "nothing to
+# migrate" -- the destination already holds data, so this is either an
+# interrupted move or a mistaken repeat, and either way the source must not
+# look safe to delete.
+out2=$(CLAUDE_PROFILES_DIR="$NEW"; _cp_migrate_store "$LEG" 2>&1)
+eq "retry on a drained source exits 1" "$?" "1"
+check "retry on a drained source warns rather than clears it for deletion" \
+   'echo "$out2" | grep -q "interrupted migration"'
+
+# A second, still-populated legacy dir must be refused as a merge -- distinct
+# from the drained-source case above, and its own dedicated guard branch.
+FRESH="$TMP/freshlegacy"
+mkdir -p "$FRESH/profiles/other"
+printf 'marker\n' > "$FRESH/profiles/other/marker"
+out3=$(CLAUDE_PROFILES_DIR="$NEW"; _cp_migrate_store "$FRESH" 2>&1)
+eq "migration refuses a non-empty destination" "$?" "1"
+check "merge refusal names the reason" 'echo "$out3" | grep -q "refusing to merge"'
+check "merge refusal leaves the fresh source untouched" \
+   '[ -f "$FRESH/profiles/other/marker" ]'
 
 (CLAUDE_PROFILES_DIR="$NEW"; _cp_migrate_store "$TMP/nope" >/dev/null 2>&1)
 eq "migration refuses a missing source" "$?" "1"
@@ -1011,6 +1027,40 @@ eq "migration refuses a missing source" "$?" "1"
 MT="$TMP/emptylegacy"; mkdir -p "$MT"
 (CLAUDE_PROFILES_DIR="$TMP/store3"; _cp_migrate_store "$MT" >/dev/null 2>&1)
 eq "migration refuses a source with no profiles" "$?" "1"
+
+# A failure partway through the entry moves must not leave the retry message
+# implying the drained parts are gone for good -- exports/ here is blocked by
+# a same-named plain file already sitting in the destination.
+LEG2="$TMP/legacy2"
+TO2="$TMP/store5"
+mkdir -p "$LEG2/profiles/x" "$LEG2/exports" "$TO2"
+printf 'p\n' > "$LEG2/profiles/x/marker"
+printf 'dev\n' > "$LEG2/active"
+printf 'blocker\n' > "$TO2/exports"
+out4=$(CLAUDE_PROFILES_DIR="$TO2"; _cp_migrate_store "$LEG2" 2>&1)
+eq "partial move failure exits 1" "$?" "1"
+check "partial move failure names what already moved" 'echo "$out4" | grep -q "already moved"'
+check "partial move failure names the entry that failed" 'echo "$out4" | grep -q "exports"'
+check "partial move failure warns against deleting the source" \
+   'echo "$out4" | grep -q "do not delete"'
+check "the already-moved entries really did move" '[ -d "$TO2/profiles/x" ]'
+check "the not-yet-moved entry is still in the source" '[ -e "$LEG2/exports" ]'
+
+# A legacy path containing BRE metacharacters must still be recognised and
+# rewritten -- grep/sed would otherwise read *, [, ], ^, $, . as regex syntax
+# instead of literal path characters and silently skip the file.
+LEGX="$TMP"'/leg.a*b[c]d^e$f'
+NEWX="$TMP/storex"
+mkdir -p "$LEGX/profiles/dev"
+printf '{ "statusLine": { "command": "%s/profiles/dev/statusline.sh" } }\n' "$LEGX" \
+    > "$LEGX/profiles/dev/settings.json"
+printf 'printf hud\n' > "$LEGX/profiles/dev/statusline.sh"
+outx=$(CLAUDE_PROFILES_DIR="$NEWX"; _cp_migrate_store "$LEGX" 2>&1)
+eq "migration with a metacharacter-laden path succeeds" "$?" "0"
+check "metacharacter path settings.json still gets rewritten" \
+   'grep -q "$NEWX/profiles/dev/statusline.sh" "$NEWX/profiles/dev/settings.json"'
+check "metacharacter path leaves no leftover old reference" \
+   '! grep -Fq "$LEGX" "$NEWX/profiles/dev/settings.json"'
 
 check "executed --migrate-store is wired up" \
    'env HOME="$FAKEHOME" CLAUDE_PROFILES_DIR="$TMP/store4" "$CPX" --migrate-store 2>&1 |

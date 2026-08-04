@@ -22,7 +22,16 @@ _cp_migrate_store() {
         return 1
     fi
     if [ ! -d "$_ms_from/profiles" ]; then
-        printf 'claude-profile: "%s" has no profiles/ to migrate\n' "$_ms_from" >&2
+        _ms_partial=0
+        for _ms_e in $_CP_MIGRATE_ENTRIES; do
+            [ -e "$_ms_to/$_ms_e" ] && _ms_partial=1
+        done
+        if [ "$_ms_partial" = 1 ]; then
+            printf 'claude-profile: "%s" has no profiles/, but "%s" already holds migrated data -- this looks like an interrupted migration; do not delete "%s" until you check what remains there\n' \
+                "$_ms_from" "$_ms_to" "$_ms_from" >&2
+        else
+            printf 'claude-profile: "%s" has no profiles/ to migrate\n' "$_ms_from" >&2
+        fi
         return 1
     fi
     if [ -e "$_ms_to/profiles" ]; then
@@ -37,13 +46,20 @@ _cp_migrate_store() {
             return 1 ;;
     esac
     mkdir -p "$_ms_to" || return 1
+    _ms_moved=""
     for _ms_e in $_CP_MIGRATE_ENTRIES; do
         [ -e "$_ms_from/$_ms_e" ] || continue
         if ! mv "$_ms_from/$_ms_e" "$_ms_to/$_ms_e"; then
-            printf 'claude-profile: could not move %s\n' "$_ms_e" >&2
+            if [ -n "$_ms_moved" ]; then
+                printf 'claude-profile: already moved %s to "%s"; "%s" failed -- do not delete "%s" yet\n' \
+                    "$_ms_moved" "$_ms_to" "$_ms_e" "$_ms_from" >&2
+            else
+                printf 'claude-profile: could not move %s\n' "$_ms_e" >&2
+            fi
             return 1
         fi
         printf 'moved %s\n' "$_ms_e"
+        _ms_moved="${_ms_moved:+$_ms_moved }$_ms_e"
     done
     _cp_migrate_rewrite "$_ms_from" "$_ms_to" || return 1
     printf 'store is now %s\n' "$_ms_to"
@@ -57,23 +73,33 @@ _cp_migrate_rewrite() {
     _mr_to="$2"
     _mr_backup="$_mr_to/.backups/migrate-$(date +%Y%m%d-%H%M%S)"
     _mr_rewrote=0
+    # $_mr_from is used as a regex below; a literal . * [ ] ^ $ in a real
+    # path would otherwise be read as regex syntax and silently mismatch.
+    # grep -F sidesteps that on the match gate; sed has no fixed-string mode,
+    # so its pattern copy is escaped instead. The bracket order (] first)
+    # matters: it is the one position where ] can appear literal.
+    _mr_pat=$(printf '%s' "$_mr_from" | sed 's/[].[*^$\\]/\\&/g')
     for _mr_p in "$_mr_to"/profiles/*/settings.json \
                  "$_mr_to"/profiles/*/settings.local.json \
                  "$_mr_to"/profiles/*/statusline.sh \
                  "$_mr_to"/profiles/*/hooks/*; do
         [ -f "$_mr_p" ] || continue
-        grep -q "$_mr_from/profiles/" "$_mr_p" 2>/dev/null || continue
+        grep -Fq "$_mr_from/profiles/" "$_mr_p" 2>/dev/null || continue
         _mr_rel=${_mr_p#"$_mr_to"/}
         if ! mkdir -p "$_mr_backup/$(dirname "$_mr_rel")"; then
             printf 'claude-profile: could not create %s\n' "$_mr_backup" >&2
             return 1
         fi
+        # Captured before cp: cp's mode is subject to umask, the source file's
+        # own bit is not.
+        _mr_was_exec=0
+        [ -x "$_mr_p" ] && _mr_was_exec=1
         cp "$_mr_p" "$_mr_backup/$_mr_rel" || {
             printf 'claude-profile: could not back up %s\n' "$_mr_rel" >&2
             return 1
         }
         _mr_t="$_mr_p.cp-tmp.$$"
-        if ! sed "s|$_mr_from/profiles/|$_mr_to/profiles/|g" "$_mr_p" > "$_mr_t"; then
+        if ! sed "s|$_mr_pat/profiles/|$_mr_to/profiles/|g" "$_mr_p" > "$_mr_t"; then
             rm -f "$_mr_t"
             printf 'claude-profile: could not rewrite %s\n' "$_mr_rel" >&2
             return 1
@@ -83,9 +109,9 @@ _cp_migrate_rewrite() {
             printf 'claude-profile: could not replace %s\n' "$_mr_rel" >&2
             return 1
         fi
-        # mv over the original drops the mode bits a temp file was created
-        # with; restore the executable bit if the backed-up original had it.
-        [ -x "$_mr_backup/$_mr_rel" ] && chmod +x "$_mr_p"
+        # mv over the original drops the mode bits the temp file was created
+        # with; restore the executable bit if the original had it.
+        [ "$_mr_was_exec" = 1 ] && chmod +x "$_mr_p"
         printf 'rewrote %s\n' "$_mr_rel"
         _mr_rewrote=1
     done
