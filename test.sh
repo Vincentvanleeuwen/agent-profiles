@@ -809,9 +809,12 @@ check_with "install.sh parses under dash" dash 'dash -n "$HERE/install.sh"'
 
 # CP_RC, CP_LINK_DIR and CP_ZSHENV are the seams that keep copy_code, link_bin
 # and add_zshenv_path off the real ~/.claude-profile, ~/.local/bin and ~/.zshenv.
+# HOME gets its own fixture dir too, so this doesn't ride the suite-wide $FAKEHOME.
+IH_IRC="$TMP/ihome-ircwrite"
+mkdir -p "$IH_IRC"
 IRC="$TMP/fakerc"
 : > "$IRC"
-IRC_ENV="CP_RC=$IRC CLAUDE_PROFILE_INSTALL_DIR=$TMP/irc-install CP_LINK_DIR=$TMP/irc-install/.local/bin CP_ZSHENV=$TMP/irc-install/.zshenv"
+IRC_ENV="HOME=$IH_IRC CP_RC=$IRC CLAUDE_PROFILE_INSTALL_DIR=$TMP/irc-install CP_LINK_DIR=$TMP/irc-install/.local/bin CP_ZSHENV=$TMP/irc-install/.zshenv"
 check "install writes the source line" \
    'env $IRC_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1 && grep -qF "claude-profile.sh" "$IRC"'
 # shellcheck disable=SC2086 # IRC_ENV is a list of VAR=val words, splitting is the point
@@ -960,7 +963,10 @@ check "install with nothing to rewrite still migrated the clone" \
 
 # Every existing user has a line pointing at their old clone. Repoint it
 # rather than refuse -- leaving them with no path forward is worse.
-CONFLICT_ENV="CP_RC=$TMP/conflictrc CLAUDE_PROFILE_INSTALL_DIR=$TMP/conflict-install CP_LINK_DIR=$TMP/conflict-install/.local/bin CP_ZSHENV=$TMP/conflict-install/.zshenv"
+# HOME gets its own fixture dir too, so this doesn't ride the suite-wide $FAKEHOME.
+IH_CONFLICT="$TMP/ihome-conflict"
+mkdir -p "$IH_CONFLICT"
+CONFLICT_ENV="HOME=$IH_CONFLICT CP_RC=$TMP/conflictrc CLAUDE_PROFILE_INSTALL_DIR=$TMP/conflict-install CP_LINK_DIR=$TMP/conflict-install/.local/bin CP_ZSHENV=$TMP/conflict-install/.zshenv"
 printf 'source ~/elsewhere/claude-profile.sh\n' > "$TMP/conflictrc"
 # shellcheck disable=SC2086 # CONFLICT_ENV is a list of VAR=val words, splitting is the point
 env $CONFLICT_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1
@@ -972,8 +978,14 @@ eq "the rewrite left exactly one source line" \
 
 # A commented-out mention is not a source line this script can repoint --
 # stop and say so by hand, rather than duplicate or guess.
+# Every seam pinned to its own fixture dir, none riding the suite-wide $FAKEHOME.
+IH_COMMENTED="$TMP/ihome-commented"
+mkdir -p "$IH_COMMENTED"
 printf '# source ~/elsewhere/claude-profile.sh\n' > "$TMP/commentedrc"
-CP_RC="$TMP/commentedrc" "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+env HOME="$IH_COMMENTED" CP_RC="$TMP/commentedrc" \
+    CLAUDE_PROFILE_INSTALL_DIR="$IH_COMMENTED/.claude-profile" \
+    CP_LINK_DIR="$IH_COMMENTED/.local/bin" CP_ZSHENV="$IH_COMMENTED/.zshenv" \
+    "$HERE/install.sh" --no-migrate >/dev/null 2>&1
 eq "install refuses a commented-out mention" "$?" "1"
 eq "install left the commented-out rc alone" \
    "$(cat "$TMP/commentedrc")" "# source ~/elsewhere/claude-profile.sh"
