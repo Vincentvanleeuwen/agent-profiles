@@ -12,6 +12,10 @@ _cp_store() {
     fi
 }
 
+_cp_install_dir() {
+    printf '%s' "${CLAUDE_PROFILE_INSTALL_DIR:-$HOME/.claude-profile}"
+}
+
 _cp_read_name() {
     sed -e 's/#.*//' -e 's/[[:space:]]//g' "$1" 2>/dev/null | grep -m1 .
 }

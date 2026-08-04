@@ -929,5 +929,49 @@ eq "install rejects --rc with no value" "$?" "1"
 
 rm -rf "$TMP/xstore"
 
+echo "== Task 17: real claude discovery =="
+
+# Task 5 puts a script named claude on PATH. `command claude` would resolve to
+# it and recurse, so the resolver has to skip anything inside the install dir --
+# including a symlink that only points there.
+mkdir -p "$TMP/fakeinstall/bin" "$TMP/realbin" "$TMP/earlybin"
+printf '#!/bin/sh\nprintf shim\n' > "$TMP/fakeinstall/bin/claude"
+printf '#!/bin/sh\nprintf real\n' > "$TMP/realbin/claude"
+chmod +x "$TMP/fakeinstall/bin/claude" "$TMP/realbin/claude"
+ln -s "$TMP/fakeinstall/bin/claude" "$TMP/earlybin/claude"
+
+got=$(
+    CLAUDE_PROFILE_INSTALL_DIR="$TMP/fakeinstall"
+    PATH="$TMP/fakeinstall/bin:$TMP/realbin"
+    _cp_real_claude
+)
+eq "resolver skips our own shim" "$got" "$TMP/realbin/claude"
+
+got=$(
+    CLAUDE_PROFILE_INSTALL_DIR="$TMP/fakeinstall"
+    # /usr/bin:/bin stay on PATH so _cp_deref can still shell out to readlink
+    # and dirname -- neither has a claude binary, so the assertion is unaffected.
+    PATH="$TMP/earlybin:$TMP/realbin:/usr/bin:/bin"
+    _cp_real_claude
+)
+eq "resolver skips a symlink into the install dir" "$got" "$TMP/realbin/claude"
+
+(
+    CLAUDE_PROFILE_INSTALL_DIR="$TMP/fakeinstall"
+    PATH="$TMP/fakeinstall/bin"
+    _cp_real_claude >/dev/null 2>&1
+)
+eq "resolver fails when only our shim is on PATH" "$?" "1"
+
+eq "install dir honours its env seam" \
+   "$(CLAUDE_PROFILE_INSTALL_DIR=/x/y; _cp_install_dir)" "/x/y"
+got=$(unset CLAUDE_PROFILE_INSTALL_DIR; _cp_install_dir)
+eq "install dir defaults under HOME" "$got" "$FAKEHOME/.claude-profile"
+
+eq "deref follows a symlink chain" "$(_cp_deref "$TMP/earlybin/claude")" \
+   "$TMP/fakeinstall/bin/claude"
+eq "deref leaves a real file alone" "$(_cp_deref "$TMP/realbin/claude")" \
+   "$TMP/realbin/claude"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

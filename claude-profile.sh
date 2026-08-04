@@ -50,20 +50,24 @@ else
     esac
 fi
 
-# Directory holding this file with symlinks resolved, so lib/ is still findable
-# when claude-profile.sh is symlinked into a dotfiles repo or ~/bin.
-# readlink -f would be shorter but is not portable; this loop is.
-_cp_libdir() {
-    _ld_p="$1"
-    while [ -L "$_ld_p" ]; do
-        _ld_t=$(readlink "$_ld_p")
-        case "$_ld_t" in
-            /*) _ld_p="$_ld_t" ;;
-            *)  _ld_p="$(dirname "$_ld_p")/$_ld_t" ;;
+# Resolves a path's symlink chain fully, so lib/ is still findable when
+# claude-profile.sh is symlinked into a dotfiles repo or ~/bin, and so the
+# real-claude resolver in lib/commands.sh can tell a shim from the binary
+# it points at. readlink -f would be shorter but is not portable; this loop
+# is. Stays here rather than in lib/: it runs before lib/ has been located.
+_cp_deref() {
+    _dr_p="$1"
+    while [ -L "$_dr_p" ]; do
+        _dr_t=$(readlink "$_dr_p")
+        case "$_dr_t" in
+            /*) _dr_p="$_dr_t" ;;
+            *)  _dr_p="$(dirname "$_dr_p")/$_dr_t" ;;
         esac
     done
-    (cd "$(dirname "$_ld_p")" && pwd)
+    printf '%s' "$_dr_p"
 }
+
+_cp_libdir() { (cd "$(dirname "$(_cp_deref "$1")")" && pwd); }
 _CP_LIB="$(_cp_libdir "$_CP_SELF")/lib"
 
 # Load order does not matter — sh resolves function references at call time, and

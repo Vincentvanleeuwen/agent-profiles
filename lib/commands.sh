@@ -60,11 +60,37 @@ _cp_cmd_status() {
 
 _CP_RUNNER=${_CP_RUNNER:-}
 
+# A shim named claude sits ahead of the real binary on PATH once installed, so
+# `command claude` would resolve back to us and loop. Walk PATH by hand and skip
+# anything that resolves inside the install dir.
+_cp_real_claude() {
+    _rc_skip=$(_cp_install_dir)
+    _rc_ifs=$IFS
+    IFS=:
+    # shellcheck disable=SC2086 # splitting PATH on colons is the point
+    set -- $PATH
+    IFS=$_rc_ifs
+    for _rc_d in "$@"; do
+        [ -n "$_rc_d" ] || _rc_d=.
+        [ -f "$_rc_d/claude" ] && [ -x "$_rc_d/claude" ] || continue
+        case "$(_cp_deref "$_rc_d/claude")" in
+            "$_rc_skip"/*) continue ;;
+        esac
+        printf '%s' "$_rc_d/claude"
+        return 0
+    done
+    return 1
+}
+
 _cp_run_claude() {
     if [ -n "$_CP_RUNNER" ]; then
         "$_CP_RUNNER" "$@"
     else
-        command claude "$@"
+        _rc_bin=$(_cp_real_claude) || {
+            printf 'claude-profile: no claude binary on PATH\n' >&2
+            return 127
+        }
+        "$_rc_bin" "$@"
     fi
 }
 
