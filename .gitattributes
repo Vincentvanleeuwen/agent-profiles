@@ -1,0 +1,17 @@
+# These are shell scripts with a shebang, and one of them is meant to be run
+# directly. A CRLF checkout breaks that at the first line — the kernel reads the
+# interpreter as "/bin/sh\r" and reports "bad interpreter: no such file or
+# directory". Well before that, dash refuses to parse "then\r" as `then`.
+#
+# Git's own core.autocrlf=true on a Windows clone is enough to cause both, so
+# the working tree is pinned here rather than left to each contributor's config.
+*.sh text eol=lf
+.shellcheckrc text eol=lf
+.gitattributes text eol=lf
+
+# The Windows half wants the opposite, for the same kind of reason. Windows
+# PowerShell 5.1 parses a BOM-less script as Windows-1252 rather than UTF-8, so
+# these files are written in pure ASCII and pinned to CRLF -- the encoding a
+# 5.1 host is least able to get wrong.
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf

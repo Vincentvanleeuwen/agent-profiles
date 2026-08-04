@@ -1,4 +1,6 @@
-# claude-profile.sh is sourced, not executed, so it has no shebang to infer from.
+# The lib/ files and test.sh are sourced, not executed, so there is no shebang
+# to infer a dialect from. claude-profile.sh and install.sh do have one, and it
+# agrees with this.
 shell=sh
 
 # test.sh drives everything through `check "name" 'shell expression'`, which
