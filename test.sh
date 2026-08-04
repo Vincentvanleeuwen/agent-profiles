@@ -551,7 +551,7 @@ check "parses under bash"  'bash -n "$HERE/claude-profile.sh"'
 check_with "parses under zsh" zsh 'zsh -n "$HERE/claude-profile.sh"'
 # Suppressions and shell= live in .shellcheckrc, so this stays a bare invocation.
 check_with "passes shellcheck" shellcheck \
-  'shellcheck "$HERE/claude-profile.sh" "$HERE/install.sh" "$HERE"/lib/*.sh "$HERE/test.sh"'
+  'shellcheck "$HERE/claude-profile.sh" "$HERE/install.sh" "$HERE"/lib/*.sh "$HERE/test.sh" "$HERE/bin/claude"'
 # Excludes POSIX character classes like [[:space:]] ("[[" followed by ":"),
 # which are legitimate sh and not the bash [[ ]] test bashism.
 check "no bashisms: no [[" '! grep -qE "\[\[[^:]" "$HERE/claude-profile.sh"'
@@ -1067,6 +1067,40 @@ check "executed --migrate-store is wired up" \
     grep -q "needs a directory"'
 check "help mentions --migrate-store" \
    'env $XENV "$CPX" --help | grep -q -- "--migrate-store"'
+
+echo "== Task 19: bin shims =="
+
+# _CP_RUNNER is read from the environment, so a real script stands in for the
+# claude binary across a subprocess boundary where a shell function cannot.
+printf '#!/bin/sh\nprintf "CFG=%%s ARGS=%%s\\n" "$CLAUDE_CONFIG_DIR" "$*"\n' > "$TMP/fakerunner"
+chmod +x "$TMP/fakerunner"
+
+env $XENV "$CPX" --create shimprof >/dev/null
+printf 'shimprof\n' > "$TMP/xstore/active"
+
+check "bin/claude-profile is a symlink" '[ -L "$HERE/bin/claude-profile" ]'
+# Assert the link text, not a dereferenced path: _cp_deref resolves a relative
+# link against its own directory, so it returns "<repo>/bin/../claude-profile.sh"
+# -- correct, and never string-equal to "<repo>/claude-profile.sh".
+eq "bin/claude-profile points at the entry script" \
+   "$(readlink "$HERE/bin/claude-profile")" "../claude-profile.sh"
+check "symlinked entry still finds lib" \
+   'env $XENV "$HERE/bin/claude-profile" | grep -q "^store: "'
+
+out=$(env $XENV _CP_RUNNER="$TMP/fakerunner" "$HERE/bin/claude" --version 2>&1)
+check "shim launches the active profile" \
+   'echo "$out" | grep -q "CFG=$TMP/xstore/profiles/shimprof ARGS=--version"'
+
+out=$(env $XENV "$HERE/bin/claude" profile 2>&1)
+check "shim passes 'profile' through to the wrapper" 'echo "$out" | grep -q "^store: "'
+
+out=$(env $XENV _CP_RUNNER="$TMP/fakerunner" "$CPX" --run-active -p hi 2>&1)
+check "--run-active passes args through" \
+   'echo "$out" | grep -q "CFG=$TMP/xstore/profiles/shimprof ARGS=-p hi"'
+
+check "shim is executable"      '[ -x "$HERE/bin/claude" ]'
+check "shim has no CR bytes"    '! grep -q "$(printf "\r")" "$HERE/bin/claude"'
+check_with "shim parses under dash" dash 'dash -n "$HERE/bin/claude"'
 
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

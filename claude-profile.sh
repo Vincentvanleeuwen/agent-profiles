@@ -131,6 +131,8 @@ _cp_main() {
         --install-statusline)   _cp_cmd_install_statusline ;;
         --uninstall-statusline) _cp_cmd_uninstall_statusline ;;
         --migrate-store)     shift; _cp_migrate_store "$@" ;;
+        # Internal, and deliberately absent from --help: it exists for bin/claude, not for people.
+        --run-active)        shift; _cp_launch "$(_cp_resolve)" "$@" ;;
         # Internal, and deliberately absent from --help: it is a hook, not a
         # command. The PowerShell wrapper starts claude itself — a TUI cannot be
         # run through a non-interactive `bash -c` — so it has no _cp_launch to
