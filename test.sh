@@ -807,21 +807,115 @@ check ".gitattributes pins sh to lf" \
 check "install.sh is executable" '[ -x "$HERE/install.sh" ]'
 check_with "install.sh parses under dash" dash 'dash -n "$HERE/install.sh"'
 
-# CP_RC is the seam that keeps these off the real ~/.zshrc.
+# CP_RC, CP_LINK_DIR and CP_ZSHENV are the seams that keep copy_code, link_bin
+# and add_zshenv_path off the real ~/.claude-profile, ~/.local/bin and ~/.zshenv.
 IRC="$TMP/fakerc"
 : > "$IRC"
+IRC_ENV="CP_RC=$IRC CLAUDE_PROFILE_INSTALL_DIR=$TMP/irc-install CP_LINK_DIR=$TMP/irc-install/.local/bin CP_ZSHENV=$TMP/irc-install/.zshenv"
 check "install writes the source line" \
-   'CP_RC="$IRC" "$HERE/install.sh" >/dev/null 2>&1 && grep -qF "claude-profile.sh" "$IRC"'
-CP_RC="$IRC" "$HERE/install.sh" >/dev/null 2>&1
-CP_RC="$IRC" "$HERE/install.sh" >/dev/null 2>&1
+   'env $IRC_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1 && grep -qF "claude-profile.sh" "$IRC"'
+# shellcheck disable=SC2086 # IRC_ENV is a list of VAR=val words, splitting is the point
+env $IRC_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+# shellcheck disable=SC2086 # IRC_ENV is a list of VAR=val words, splitting is the point
+env $IRC_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1
 eq "install is idempotent" "$(grep -c 'claude-profile\.sh' "$IRC")" "1"
 
-# Stop and explain, rather than edit a line it did not write.
+# Surface A and surface B both come from the installer, so both are asserted
+# here against a throwaway HOME rather than trusted to the docs. --no-migrate
+# is required on every one of these: SELF_DIR is $HERE, the real checkout,
+# which has a real profiles/ dir, and without the flag migrate_clone_store
+# would move this repo's own profiles/ into the fake HOME under test.
+IH="$TMP/ihome-stable"
+mkdir -p "$IH"
+env HOME="$IH" SHELL=/bin/zsh CP_RC="$IH/.zshrc" CP_ZSHENV="$IH/.zshenv" \
+    CP_LINK_DIR="$IH/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH/.claude-profile" \
+    sh "$HERE/install.sh" --from-npm --no-migrate >"$TMP/stableout" 2>&1
+eq "install --from-npm succeeds" "$?" "0"
+check "code landed in the install dir" '[ -f "$IH/.claude-profile/claude-profile.sh" ] &&
+                                        [ -d "$IH/.claude-profile/lib" ]'
+check "surface A is on PATH"      '[ -L "$IH/.local/bin/claude-profile" ]'
+check "surface A actually runs"   'env HOME="$IH" "$IH/.local/bin/claude-profile" --help |
+                                   grep -q -- "--create"'
+check "shim installed"            '[ -x "$IH/.claude-profile/bin/claude" ]'
+check "zshenv prepends the bin dir" \
+   'grep -qF "$IH/.claude-profile/bin" "$IH/.zshenv"'
+check "zshenv guards against a double prepend" 'grep -q "case \":\$PATH:\"" "$IH/.zshenv"'
+check "rc points at the install dir" \
+   'grep -qF "$IH/.claude-profile/claude-profile.sh" "$IH/.zshrc"'
+check "--from-npm prints the migrate hint" 'grep -q -- "--migrate-store" "$TMP/stableout"'
+
+env HOME="$IH" SHELL=/bin/zsh CP_RC="$IH/.zshrc" CP_ZSHENV="$IH/.zshenv" \
+    CP_LINK_DIR="$IH/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH/.claude-profile" \
+    sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
+eq "install is idempotent in the rc"     "$(grep -c 'claude-profile\.sh' "$IH/.zshrc")" "1"
+eq "install is idempotent in the zshenv" "$(grep -c 'claude-profile/bin' "$IH/.zshenv")" "1"
+
+# A clone-pointing line is the state every existing user is in. Rewrite it;
+# refusing would leave them broken with no path forward.
+IH2="$TMP/ihome-oldline"
+mkdir -p "$IH2"
+printf 'source %s/claude-profile.sh\n' "$HERE" > "$IH2/.zshrc"
+env HOME="$IH2" SHELL=/bin/zsh CP_RC="$IH2/.zshrc" CP_ZSHENV="$IH2/.zshenv" \
+    CP_LINK_DIR="$IH2/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH2/.claude-profile" \
+    sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
+eq "install rewrites a clone-pointing rc line" "$?" "0"
+eq "only one source line remains" "$(grep -c 'claude-profile\.sh' "$IH2/.zshrc")" "1"
+check "the remaining line points at the install dir" \
+   'grep -qF "$IH2/.claude-profile/claude-profile.sh" "$IH2/.zshrc"'
+
+IH3="$TMP/ihome-noshim"
+mkdir -p "$IH3"
+env HOME="$IH3" SHELL=/bin/zsh CP_RC="$IH3/.zshrc" CP_ZSHENV="$IH3/.zshenv" \
+    CP_LINK_DIR="$IH3/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH3/.claude-profile" \
+    sh "$HERE/install.sh" --from-npm --no-shim --no-migrate >/dev/null 2>&1
+check "--no-shim leaves no shim"   '[ ! -e "$IH3/.claude-profile/bin/claude" ]'
+check "--no-shim keeps surface A"  '[ -L "$IH3/.local/bin/claude-profile" ]'
+check "--no-shim skips the zshenv" '[ ! -f "$IH3/.zshenv" ] ||
+                                    ! grep -q "claude-profile/bin" "$IH3/.zshenv"'
+
+# A clone carrying a store gets it migrated, not silently orphaned. This is
+# the one install.sh run in the whole suite that must NOT pass --no-migrate:
+# it runs from a throwaway copy of the repo ($CLONE), never from $HERE, so
+# there is nothing real for auto-migration to damage.
+IH4="$TMP/ihome-migrate"
+CLONE="$TMP/oldclone"
+mkdir -p "$IH4" "$CLONE/profiles/legacyprof"
+cp "$HERE/claude-profile.sh" "$HERE/install.sh" "$CLONE/"
+cp -R "$HERE/lib" "$HERE/bin" "$CLONE/"
+printf '{ "x": "%s/profiles/legacyprof/statusline.sh" }\n' "$CLONE" \
+    > "$CLONE/profiles/legacyprof/settings.json"
+# CLAUDE_PROFILES_DIR is exported earlier in this suite (line ~61) and would
+# otherwise leak into this subprocess, sending the migrated store to $TMP/store
+# instead of under $IH4. Override it explicitly rather than unsetting the
+# suite-wide export.
+env HOME="$IH4" SHELL=/bin/zsh CP_RC="$IH4/.zshrc" CP_ZSHENV="$IH4/.zshenv" \
+    CP_LINK_DIR="$IH4/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH4/.claude-profile" \
+    CLAUDE_PROFILES_DIR="$IH4/.claude-profiles" \
+    sh "$CLONE/install.sh" --from-npm >/dev/null 2>&1 || true
+check "a clone store was migrated" '[ -d "$IH4/.claude-profiles/profiles/legacyprof" ]'
+check "migrated settings were rewritten" \
+   'grep -q "$IH4/.claude-profiles/profiles/legacyprof/statusline.sh" \
+      "$IH4/.claude-profiles/profiles/legacyprof/settings.json"'
+
+# Every existing user has a line pointing at their old clone. Repoint it
+# rather than refuse -- leaving them with no path forward is worse.
+CONFLICT_ENV="CP_RC=$TMP/conflictrc CLAUDE_PROFILE_INSTALL_DIR=$TMP/conflict-install CP_LINK_DIR=$TMP/conflict-install/.local/bin CP_ZSHENV=$TMP/conflict-install/.zshenv"
 printf 'source ~/elsewhere/claude-profile.sh\n' > "$TMP/conflictrc"
-CP_RC="$TMP/conflictrc" "$HERE/install.sh" >/dev/null 2>&1
-eq "install refuses a conflicting line" "$?" "1"
-eq "install left the conflicting rc alone" \
-   "$(cat "$TMP/conflictrc")" "source ~/elsewhere/claude-profile.sh"
+# shellcheck disable=SC2086 # CONFLICT_ENV is a list of VAR=val words, splitting is the point
+env $CONFLICT_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+eq "install rewrites a line pointing at another clone" "$?" "0"
+check "the rewritten line points at the install dir" \
+   'grep -qxF ". \"$TMP/conflict-install/claude-profile.sh\"" "$TMP/conflictrc"'
+eq "the rewrite left exactly one source line" \
+   "$(grep -c 'claude-profile\.sh' "$TMP/conflictrc")" "1"
+
+# A commented-out mention is not a source line this script can repoint --
+# stop and say so by hand, rather than duplicate or guess.
+printf '# source ~/elsewhere/claude-profile.sh\n' > "$TMP/commentedrc"
+CP_RC="$TMP/commentedrc" "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+eq "install refuses a commented-out mention" "$?" "1"
+eq "install left the commented-out rc alone" \
+   "$(cat "$TMP/commentedrc")" "# source ~/elsewhere/claude-profile.sh"
 
 # $SHELL is the login shell from the password database, not the shell you are
 # typing into. Keying off it alone made this exit 1 on every container, WSL
@@ -829,23 +923,23 @@ eq "install left the conflicting rc alone" \
 # these four pin down.
 IH="$TMP/ihome"; mkdir -p "$IH"; : > "$IH/.bashrc"
 check "install works when \$SHELL is /bin/sh" \
-   'env HOME="$IH" SHELL=/bin/sh bash "$HERE/install.sh" >/dev/null 2>&1 &&
+   'env HOME="$IH" SHELL=/bin/sh bash "$HERE/install.sh" --no-migrate >/dev/null 2>&1 &&
     grep -qF "claude-profile.sh" "$IH/.bashrc"'
 
 IH2="$TMP/ihome2"; mkdir -p "$IH2"; : > "$IH2/.zshrc"
 check "install picks .zshrc for a zsh login shell" \
-   'env HOME="$IH2" SHELL=/bin/zsh sh "$HERE/install.sh" >/dev/null 2>&1 &&
+   'env HOME="$IH2" SHELL=/bin/zsh sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1 &&
     grep -qF "claude-profile.sh" "$IH2/.zshrc"'
 
 # A named shell with no rc yet is a fresh account, not an ambiguity.
 IH3="$TMP/ihome3"; mkdir -p "$IH3"
 check "install creates a missing rc for a known shell" \
-   'env HOME="$IH3" SHELL=/bin/zsh sh "$HERE/install.sh" >/dev/null 2>&1 &&
+   'env HOME="$IH3" SHELL=/bin/zsh sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1 &&
     [ -f "$IH3/.zshrc" ]'
 
 # Two candidates and nothing to choose between them is where it must stop.
 IH4="$TMP/ihome4"; mkdir -p "$IH4"; : > "$IH4/.zshrc"; : > "$IH4/.bashrc"
-env HOME="$IH4" sh -c "SHELL=/bin/sh exec \"$HERE/install.sh\"" >/dev/null 2>&1
+env HOME="$IH4" sh -c "SHELL=/bin/sh exec \"$HERE/install.sh\" --no-migrate" >/dev/null 2>&1
 eq "install stops when both rc files exist and \$SHELL is unhelpful" "$?" "1"
 check "install left both candidate rc files alone" \
    '[ ! -s "$IH4/.zshrc" ] && [ ! -s "$IH4/.bashrc" ]'
@@ -855,7 +949,7 @@ check "install left both candidate rc files alone" \
 # in and `bash -l`, `su -` and most container entrypoints never see it — an
 # install that reports success and does nothing. zsh has no equivalent gap.
 IH7="$TMP/ihome7"; mkdir -p "$IH7"
-env HOME="$IH7" SHELL=/bin/bash sh "$HERE/install.sh" >/dev/null 2>&1
+env HOME="$IH7" SHELL=/bin/bash sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
 eq "install succeeds on a bare HOME" "$?" "0"
 check "install adds a login hook on a bare HOME" \
    '[ -f "$IH7/.bash_profile" ] && grep -q "\.bashrc" "$IH7/.bash_profile"'
@@ -869,7 +963,7 @@ check_with "a login shell reaches the wrapper" bash \
 # of .bash_profile/.bash_login/.profile — so adding one would shadow it.
 IH8="$TMP/ihome8"; mkdir -p "$IH8"; : > "$IH8/.bashrc"
 printf 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi\n' > "$IH8/.profile"
-env HOME="$IH8" SHELL=/bin/bash sh "$HERE/install.sh" >/dev/null 2>&1
+env HOME="$IH8" SHELL=/bin/bash sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
 eq "install accepts a .profile that sources .bashrc" "$?" "0"
 check "install does not shadow .profile with .bash_profile" \
    '[ ! -f "$IH8/.bash_profile" ]'
@@ -879,7 +973,7 @@ check "install does not shadow .profile with .bash_profile" \
 # nothing, and do not exit 0 on a half-reachable install.
 IH9="$TMP/ihome9"; mkdir -p "$IH9"; : > "$IH9/.bashrc"
 printf 'export FOO=1\n' > "$IH9/.bash_profile"
-env HOME="$IH9" SHELL=/bin/bash sh "$HERE/install.sh" >/dev/null 2>&1
+env HOME="$IH9" SHELL=/bin/bash sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
 eq "install reports a login shell it cannot reach" "$?" "1"
 eq "install left the login file alone" "$(cat "$IH9/.bash_profile")" "export FOO=1"
 
@@ -889,7 +983,7 @@ eq "install left the login file alone" "$(cat "$IH9/.bash_profile")" "export FOO
 IH10="$TMP/ihome10"; mkdir -p "$IH10"
 printf 'alias claude=echo\n' > "$IH10/.bashrc"
 printf 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi\n' > "$IH10/.profile"
-env HOME="$IH10" SHELL=/bin/bash sh "$HERE/install.sh" >"$TMP/aliasout" 2>&1
+env HOME="$IH10" SHELL=/bin/bash sh "$HERE/install.sh" --no-migrate >"$TMP/aliasout" 2>&1
 eq "install fails when an alias shadows the wrapper" "$?" "1"
 check "install names the alias it found" 'grep -q "alias" "$TMP/aliasout"'
 
@@ -899,7 +993,7 @@ if command -v zsh >/dev/null 2>&1; then
     skip "install skips the load check without the target shell" zsh-absent
 else
     IH11="$TMP/ihome11"; mkdir -p "$IH11"; : > "$IH11/.zshrc"
-    env HOME="$IH11" SHELL=/bin/zsh sh "$HERE/install.sh" >"$TMP/zshout" 2>&1
+    env HOME="$IH11" SHELL=/bin/zsh sh "$HERE/install.sh" --no-migrate >"$TMP/zshout" 2>&1
     eq "install without the target shell still succeeds" "$?" "0"
     check "install skips the load check without the target shell" \
        'grep -q "skipping the load check" "$TMP/zshout"'
@@ -908,24 +1002,29 @@ fi
 # An --rc can name a file no shell reads, so the claim has to shrink to what
 # was actually established: sourcing it works, reachability is unknown.
 check "an explicit --rc does not claim reachability" \
-   'CP_RC="$TMP/explicitrc" "$HERE/install.sh" 2>&1 | grep -q "was not checked"'
+   'CP_RC="$TMP/explicitrc" "$HERE/install.sh" --no-migrate 2>&1 | grep -q "was not checked"'
 
 check "install honours --shell" \
    'env HOME="$TMP/ihome5" sh -c "mkdir -p \"$TMP/ihome5\"" &&
-    env HOME="$TMP/ihome5" SHELL=/bin/sh sh "$HERE/install.sh" --shell bash >/dev/null 2>&1 &&
+    env HOME="$TMP/ihome5" SHELL=/bin/sh sh "$HERE/install.sh" --shell bash --no-migrate >/dev/null 2>&1 &&
     grep -qF "claude-profile.sh" "$TMP/ihome5/.bashrc"'
 check "install honours --rc" \
-   'env HOME="$TMP/ihome6" sh "$HERE/install.sh" --rc "$TMP/ihome6rc" >/dev/null 2>&1 &&
+   'env HOME="$TMP/ihome6" sh "$HERE/install.sh" --rc "$TMP/ihome6rc" --no-migrate >/dev/null 2>&1 &&
     grep -qF "claude-profile.sh" "$TMP/ihome6rc"'
 
-"$HERE/install.sh" --help >/dev/null 2>&1
+"$HERE/install.sh" --no-migrate --help >/dev/null 2>&1
 eq "install --help exits 0" "$?" "0"
-"$HERE/install.sh" --bogus >/dev/null 2>&1
+"$HERE/install.sh" --no-migrate --bogus >/dev/null 2>&1
 eq "install rejects an unknown flag" "$?" "1"
-"$HERE/install.sh" --shell fish >/dev/null 2>&1
+"$HERE/install.sh" --no-migrate --shell fish >/dev/null 2>&1
 eq "install rejects an unsupported shell" "$?" "1"
-"$HERE/install.sh" --rc >/dev/null 2>&1
+"$HERE/install.sh" --no-migrate --rc >/dev/null 2>&1
 eq "install rejects --rc with no value" "$?" "1"
+
+# Canary: every install.sh invocation above ran with SELF_DIR pointed at this
+# repo. If migrate_clone_store ever fires without --no-migrate honoring it,
+# this repo's own profiles/ directory disappears here, loud and immediate.
+check "the repo's own profiles/ survived the install tests" '[ -d "$HERE/profiles" ]'
 
 rm -rf "$TMP/xstore"
 

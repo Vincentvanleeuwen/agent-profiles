@@ -13,8 +13,13 @@
 set -u
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
-TARGET="$SELF_DIR/claude-profile.sh"
+INSTALL_DIR=${CLAUDE_PROFILE_INSTALL_DIR:-$HOME/.claude-profile}
+BIN_DIR="$INSTALL_DIR/bin"
+LINK_DIR=${CP_LINK_DIR:-$HOME/.local/bin}
+ZSHENV=${CP_ZSHENV:-$HOME/.zshenv}
+TARGET="$INSTALL_DIR/claude-profile.sh"
 LINE=". \"$TARGET\""
+ZSHENV_MARK="# claude-profile PATH — added by install.sh"
 
 say() { printf '%s\n' "$1"; }
 die() { printf 'install: %s\n' "$1" >&2; exit 1; }
@@ -25,10 +30,14 @@ Usage: ./install.sh [options]
 
   --rc <path>        rc file to edit, skipping detection
   --shell bash|zsh   which shell's rc to edit, skipping detection
+  --no-shim          skip installing the claude shim (bin/claude)
+  --no-migrate       skip migrating a store found inside this clone
+  --from-npm         skip the fresh-shell check; npm has no terminal to check
   -h, --help         this
 
-With no options it works out which rc file your shell reads, adds the source
-line, and checks that a fresh shell picks it up.
+With no options it copies the code to $INSTALL_DIR, links claude-profile onto
+PATH, adds the source line to your shell rc, and checks that a fresh shell
+picks it up.
 EOF
 }
 
@@ -43,17 +52,24 @@ manual() {
 
 rc=""
 want_shell=""
+no_shim=""
+no_migrate=""
+from_npm=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --rc)      [ $# -ge 2 ] || die "--rc needs a path";      rc="$2";         shift 2 ;;
-        --shell)   [ $# -ge 2 ] || die "--shell needs a name";   want_shell="$2"; shift 2 ;;
-        -h|--help) usage; exit 0 ;;
-        *)         die "unknown argument $1 (try --help)" ;;
+        --rc)         [ $# -ge 2 ] || die "--rc needs a path";      rc="$2";         shift 2 ;;
+        --shell)      [ $# -ge 2 ] || die "--shell needs a name";   want_shell="$2"; shift 2 ;;
+        --no-shim)    no_shim=1;    shift ;;
+        --no-migrate) no_migrate=1; shift ;;
+        --from-npm)   from_npm=1;   shift ;;
+        -h|--help)    usage; exit 0 ;;
+        *)            die "unknown argument $1 (try --help)" ;;
     esac
 done
 
-[ -f "$TARGET" ]       || die "cannot find $TARGET"
+[ -f "$SELF_DIR/claude-profile.sh" ] || die "cannot find $SELF_DIR/claude-profile.sh"
 [ -d "$SELF_DIR/lib" ] || die "cannot find $SELF_DIR/lib — is the clone complete?"
+[ -d "$SELF_DIR/bin" ] || die "cannot find $SELF_DIR/bin — is the clone complete?"
 
 # CP_RC stays supported: it is how the test suite keeps this off a real rc.
 [ -n "$rc" ] || rc=${CP_RC:-}
@@ -193,20 +209,91 @@ if [ ! -f "$rc" ]; then
     say "created $rc"
 fi
 
+copy_code() {
+    [ "$SELF_DIR" = "$INSTALL_DIR" ] && return 0
+    mkdir -p "$INSTALL_DIR" || die "could not create $INSTALL_DIR"
+    for _item in claude-profile.sh lib bin claude-profile.psm1; do
+        [ -e "$SELF_DIR/$_item" ] || continue
+        rm -rf "${INSTALL_DIR:?}/$_item"
+        # -R, not -r: -R is the POSIX spelling and it copies symlinks as
+        # symlinks, which is what bin/claude-profile is.
+        cp -R "$SELF_DIR/$_item" "$INSTALL_DIR/$_item" \
+            || die "could not copy $_item into $INSTALL_DIR"
+    done
+    [ -n "$no_shim" ] && rm -f "$BIN_DIR/claude"
+    say "installed the code to $INSTALL_DIR"
+}
+
+# A pre-stable-install clone can carry its own store at $SELF_DIR/profiles.
+# --no-migrate exists because $SELF_DIR is this repo's own working tree in
+# our test run, and moving that out from under a live session is the one
+# thing this function must never do by accident.
+migrate_clone_store() {
+    [ -n "$no_migrate" ] && return 0
+    [ "$SELF_DIR" = "$INSTALL_DIR" ] && return 0
+    [ -d "$SELF_DIR/profiles" ] || return 0
+    say "found a store in $SELF_DIR, moving it out of the clone"
+    "$TARGET" --migrate-store "$SELF_DIR" \
+        || die "the code is installed but the store was not migrated. Run
+     '\"$TARGET\" --migrate-store \"$SELF_DIR\"' by hand to see the error."
+}
+
+link_bin() {
+    mkdir -p "$LINK_DIR" || die "could not create $LINK_DIR"
+    ln -sf "$BIN_DIR/claude-profile" "$LINK_DIR/claude-profile" \
+        || die "could not link $LINK_DIR/claude-profile"
+    say "linked $LINK_DIR/claude-profile"
+}
+
+# .zshenv, not .zshrc: it is the only startup file a non-interactive zsh
+# reads, which is the whole reason the claude shim needs it on PATH here.
+add_zshenv_path() {
+    [ -n "$no_shim" ] && return 0
+    [ "$want_shell" = zsh ] || return 0
+    if [ -f "$ZSHENV" ] && grep -qF "$BIN_DIR" "$ZSHENV"; then
+        say "PATH line already in $ZSHENV"
+        return 0
+    fi
+    {
+        printf '\n%s\n' "$ZSHENV_MARK"
+        printf 'case ":$PATH:" in *":%s:"*) ;; *) PATH="%s:$PATH" ;; esac\n' \
+               "$BIN_DIR" "$BIN_DIR"
+        printf 'export PATH\n'
+    } >> "$ZSHENV" || die "could not append to $ZSHENV"
+    say "added the PATH line to $ZSHENV"
+}
+
+copy_code
+migrate_clone_store
+link_bin
+add_zshenv_path
+
 # Already mentioned? Then either it is our line and there is nothing to do, or
-# it points somewhere else and this is not a decision to make on someone's
-# behalf — a second clone, a moved directory, a hand-written variant.
+# it points at a clone (or an old install dir) and needs repointing at the
+# tree copy_code just installed — refusing would leave no path forward.
 existing=$(grep -n 'claude-profile\.sh' "$rc" 2>/dev/null || true)
 if [ -n "$existing" ]; then
     if grep -qxF "$LINE" "$rc"; then
         say "already installed in $rc"
     else
-        printf 'install: %s already refers to claude-profile.sh, but not the\n' "$rc" >&2
-        printf 'way this script would write it:\n\n' >&2
-        printf '%s\n' "$existing" | sed 's/^/    /' >&2
-        printf '\nExpected:\n\n    %s\n\n' "$LINE" >&2
-        printf 'Remove or fix that line, then run this again. Nothing was changed.\n' >&2
-        exit 1
+        # Collapse any duplicates to one line while we are here.
+        _t="$rc.cp-tmp.$$"
+        awk -v line="$LINE" '
+            /claude-profile\.sh/ && /^[[:space:]]*(\.|source)[[:space:]]/ {
+                if (!done) { print line; done = 1 }
+                next
+            }
+            { print }
+        ' "$rc" > "$_t" || { rm -f "$_t"; die "could not rewrite $rc"; }
+        if ! grep -qxF "$LINE" "$_t"; then
+            rm -f "$_t"
+            die "$rc mentions claude-profile.sh in a form this script does not
+     recognise as a source line. Fix it by hand, then run this again:
+
+$(printf '%s\n' "$existing" | sed 's/^/         /')"
+        fi
+        mv "$_t" "$rc" || { rm -f "$_t"; die "could not rewrite $rc"; }
+        say "pointed the source line in $rc at $TARGET"
     fi
 else
     {
@@ -230,6 +317,9 @@ fi
 # falling back to another would read a different startup file and pass no
 # matter what was written. Only the explicit-rc case can be checked with any
 # shell, because there it is a plain source of a named file.
+if [ -n "$from_npm" ]; then
+    say "skipping the fresh-shell check: npm runs this without a terminal"
+else
 verify_bin=""
 if [ -n "$rc_explicit" ]; then
     for cand in "$want_shell" bash zsh; do
@@ -295,6 +385,14 @@ else
         printf 'does not, so `bash -l`, `su -` and most container entrypoints will\n' >&2
         printf 'silently use ~/.claude instead of the active profile.\n' >&2
     fi
+fi
+fi
+
+if [ -n "$from_npm" ]; then
+    say ""
+    say "If you are moving off a git clone, move its store too:"
+    say ""
+    say "    claude-profile --migrate-store <path-to-old-clone>"
 fi
 
 say ""
