@@ -971,5 +971,52 @@ eq "deref follows a symlink chain" "$(_cp_deref "$TMP/earlybin/claude")" \
 eq "deref leaves a real file alone" "$(_cp_deref "$TMP/realbin/claude")" \
    "$TMP/realbin/claude"
 
+echo "== Task 18: store migration =="
+
+LEG="$TMP/legacy"
+NEW="$TMP/newstore"
+mkdir -p "$LEG/profiles/dev/hooks" "$LEG/exports"
+printf '{ "statusLine": { "command": "%s/profiles/dev/statusline.sh" } }\n' "$LEG" \
+    > "$LEG/profiles/dev/settings.json"
+printf '#!/bin/sh\n%s/profiles/dev/hooks/inner.sh\n' "$LEG" > "$LEG/profiles/dev/hooks/h.sh"
+chmod +x "$LEG/profiles/dev/hooks/h.sh"
+printf 'printf hud\n' > "$LEG/profiles/dev/statusline.sh"
+printf '{ "projects": { "%s": { "n": 1 } } }\n' "$LEG" > "$LEG/profiles/dev/.claude.json"
+printf 'dev\n' > "$LEG/active"
+
+out=$(CLAUDE_PROFILES_DIR="$NEW"; _cp_migrate_store "$LEG" 2>&1)
+eq "migration succeeds" "$?" "0"
+check "migration moved profiles"     '[ -d "$NEW/profiles/dev" ] && [ ! -e "$LEG/profiles" ]'
+check "migration moved active"       '[ -f "$NEW/active" ]'
+check "migration moved exports"      '[ -d "$NEW/exports" ]'
+check "settings.json points at the new store" \
+   'grep -q "$NEW/profiles/dev/statusline.sh" "$NEW/profiles/dev/settings.json"'
+check "hook script points at the new store" \
+   'grep -q "$NEW/profiles/dev/hooks/inner.sh" "$NEW/profiles/dev/hooks/h.sh"'
+check ".claude.json still points at the old clone" \
+   'grep -q "$LEG" "$NEW/profiles/dev/.claude.json"'
+check "the original was backed up" \
+   'grep -rq "$LEG/profiles/dev/statusline.sh" "$NEW/.backups"'
+check "migration reports what it rewrote" 'echo "$out" | grep -q "settings.json"'
+check "rewritten hook keeps its executable bit" '[ -x "$NEW/profiles/dev/hooks/h.sh" ]'
+check "rewritten settings.json stays non-executable" '[ ! -x "$NEW/profiles/dev/settings.json" ]'
+
+# Second run must refuse rather than merge two stores into one.
+(CLAUDE_PROFILES_DIR="$NEW"; _cp_migrate_store "$LEG" >/dev/null 2>&1)
+eq "migration refuses a non-empty store" "$?" "1"
+
+(CLAUDE_PROFILES_DIR="$NEW"; _cp_migrate_store "$TMP/nope" >/dev/null 2>&1)
+eq "migration refuses a missing source" "$?" "1"
+
+MT="$TMP/emptylegacy"; mkdir -p "$MT"
+(CLAUDE_PROFILES_DIR="$TMP/store3"; _cp_migrate_store "$MT" >/dev/null 2>&1)
+eq "migration refuses a source with no profiles" "$?" "1"
+
+check "executed --migrate-store is wired up" \
+   'env HOME="$FAKEHOME" CLAUDE_PROFILES_DIR="$TMP/store4" "$CPX" --migrate-store 2>&1 |
+    grep -q "needs a directory"'
+check "help mentions --migrate-store" \
+   'env $XENV "$CPX" --help | grep -q -- "--migrate-store"'
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
