@@ -24,15 +24,23 @@ ZSHENV_MARK="# claude-profile PATH — added by install.sh"
 say() { printf '%s\n' "$1"; }
 die() { printf 'install: %s\n' "$1" >&2; exit 1; }
 
-# INSTALL_DIR feeds rm -rf in copy_code; refuse before it runs if it is $HOME,
-# an ancestor of $HOME, or /, where wiping breaks the whole machine.
-_id=${INSTALL_DIR%/}; [ -n "$_id" ] || _id=/
+# INSTALL_DIR feeds rm -rf in copy_code; refuse before it runs if it canonicalises
+# to $HOME, an ancestor of $HOME, or /. String checks alone miss ///, $HOME/.,
+# relative paths and symlinks, so resolve with pwd -P and compare once.
+if [ -d "$INSTALL_DIR" ]; then
+    _id=$(cd "$INSTALL_DIR" 2>/dev/null && pwd -P) || die "cannot resolve $INSTALL_DIR"
+else
+    _idp=$(cd "$(dirname "$INSTALL_DIR")" 2>/dev/null && pwd -P) \
+        || die "cannot resolve the parent of $INSTALL_DIR"
+    _id="${_idp%/}/$(basename "$INSTALL_DIR")"
+fi
+_home=$(cd "$HOME" 2>/dev/null && pwd -P) || die "cannot resolve \$HOME"
 case "$_id" in /) die "CLAUDE_PROFILE_INSTALL_DIR resolves to /" ;; esac
-[ "$_id" = "${HOME%/}" ] && die "CLAUDE_PROFILE_INSTALL_DIR is \$HOME ($HOME)"
-case "${HOME%/}" in
+[ "$_id" = "$_home" ] && die "CLAUDE_PROFILE_INSTALL_DIR is \$HOME ($HOME)"
+case "$_home" in
     "$_id"/*) die "CLAUDE_PROFILE_INSTALL_DIR ($INSTALL_DIR) is an ancestor of \$HOME" ;;
 esac
-unset _id
+unset _id _idp _home
 
 usage() {
     cat <<EOF
@@ -307,7 +315,7 @@ else
     {
         printf '\n# claude-profile — added by install.sh\n'
         printf '%s\n' "$LINE"
-    } >> "$rc" || die "could not append to $rc"
+    } >> "$rc" || die "the code is installed and both PATH surfaces are set up, but could not append to $rc"
     say "added the source line to $rc"
 fi
 

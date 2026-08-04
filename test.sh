@@ -865,6 +865,36 @@ env HOME="$IH5" CLAUDE_PROFILE_INSTALL_DIR=/ \
     sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
 eq "install refuses when INSTALL_DIR is /" "$?" "1"
 
+# Canonicalisation catches spellings a string check misses: ///, $HOME/., //
+# duplicates, relative paths and symlinks, all of which rm -rf would follow.
+IH6="$TMP/ihome-bypass"
+mkdir -p "$IH6/bin"
+: > "$IH6/bin/marker"
+
+env HOME="$IH6" CLAUDE_PROFILE_INSTALL_DIR="///" \
+    sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+eq "install refuses when INSTALL_DIR is ///" "$?" "1"
+
+env HOME="$IH6" CLAUDE_PROFILE_INSTALL_DIR="$IH6//" \
+    sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+eq "install refuses when INSTALL_DIR is \$HOME//" "$?" "1"
+
+env HOME="$IH6" CLAUDE_PROFILE_INSTALL_DIR="$IH6/." \
+    sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+eq "install refuses when INSTALL_DIR is \$HOME/." "$?" "1"
+
+(cd "$IH6" && env HOME="$IH6" CLAUDE_PROFILE_INSTALL_DIR="." \
+    sh "$HERE/install.sh" --no-migrate) >/dev/null 2>&1
+eq "install refuses when INSTALL_DIR is a relative ." "$?" "1"
+
+IH6LINK="$TMP/ihome-bypass-link"
+ln -s "$IH6" "$IH6LINK"
+env HOME="$IH6" CLAUDE_PROFILE_INSTALL_DIR="$IH6LINK" \
+    sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+eq "install refuses when INSTALL_DIR is a symlink to \$HOME" "$?" "1"
+
+check "nothing was deleted across the bypass rows" '[ -f "$IH6/bin/marker" ]'
+
 # A clone-pointing line is the state every existing user is in. Rewrite it;
 # refusing would leave them broken with no path forward.
 IH2="$TMP/ihome-oldline"
@@ -1020,7 +1050,8 @@ check "install honours --shell" \
     env HOME="$TMP/ihome5" SHELL=/bin/sh sh "$HERE/install.sh" --shell bash --no-migrate >/dev/null 2>&1 &&
     grep -qF "claude-profile.sh" "$TMP/ihome5/.bashrc"'
 check "install honours --rc" \
-   'env HOME="$TMP/ihome6" sh "$HERE/install.sh" --rc "$TMP/ihome6rc" --no-migrate >/dev/null 2>&1 &&
+   'env HOME="$TMP/ihome6" sh -c "mkdir -p \"$TMP/ihome6\"" &&
+    env HOME="$TMP/ihome6" sh "$HERE/install.sh" --rc "$TMP/ihome6rc" --no-migrate >/dev/null 2>&1 &&
     grep -qF "claude-profile.sh" "$TMP/ihome6rc"'
 
 "$HERE/install.sh" --no-migrate --help >/dev/null 2>&1
