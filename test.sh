@@ -1344,11 +1344,8 @@ check_with "postinstall is wired to the dispatcher" node \
       if (!/postinstall\.mjs/.test(p.scripts.postinstall)) process.exit(1);
    "'
 
-# npmhome stands in for a real $HOME so the dispatcher's install.sh has
-# somewhere to `cd`. Every var the installer reads is pinned here rather than
-# inherited: CLAUDE_PROFILES_DIR is exported suite-wide above and has already
-# broken three tests this way, and --no-migrate stops migrate_clone_store from
-# ever touching $HERE/profiles, the live store of the session running this.
+# CLAUDE_PROFILES_DIR is exported suite-wide (line ~61); pin every var the
+# installer reads, and pass --no-migrate so $HERE/profiles is never touched.
 mkdir -p "$TMP/npmhome"
 check_with "dispatcher runs the POSIX installer" node \
    'env HOME="$TMP/npmhome" CLAUDE_PROFILES_DIR="$TMP/npmhome/.claude-profiles" \
@@ -1356,7 +1353,9 @@ check_with "dispatcher runs the POSIX installer" node \
         CP_LINK_DIR="$TMP/npmhome/.local/bin" \
         CLAUDE_PROFILE_INSTALL_DIR="$TMP/npmhome/.claude-profile" SHELL=/bin/zsh \
         node "$HERE/scripts/postinstall.mjs" --no-migrate >/dev/null 2>&1 &&
-    [ -f "$TMP/npmhome/.claude-profile/claude-profile.sh" ]'
+    [ -f "$TMP/npmhome/.claude-profile/claude-profile.sh" ] &&
+    [ -L "$TMP/npmhome/.claude-profile/bin/claude-profile" ] &&
+    [ -L "$TMP/npmhome/.local/bin/claude-profile" ] && [ -e "$TMP/npmhome/.local/bin/claude-profile" ]'
 
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

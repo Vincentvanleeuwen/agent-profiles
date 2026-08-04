@@ -297,6 +297,9 @@ copy_code() {
         cp -R "$SELF_DIR/$_item" "$INSTALL_DIR/$_item" \
             || die "could not copy $_item into $INSTALL_DIR; $INSTALL_DIR exists but the copy is incomplete"
     done
+    # npm strips symlinks from published tarballs, so a package install can
+    # arrive without this one; a git clone already has it via the cp -R above.
+    [ -e "$BIN_DIR/claude-profile" ] || ln -s ../claude-profile.sh "$BIN_DIR/claude-profile"
     [ -n "$no_shim" ] && rm -f "$BIN_DIR/claude"
     say "installed the code to $INSTALL_DIR"
 }
