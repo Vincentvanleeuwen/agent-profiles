@@ -299,6 +299,8 @@ copy_code() {
     done
     # npm strips symlinks from published tarballs, so a package install can
     # arrive without this one; a git clone already has it via the cp -R above.
+    # Stays a symlink, not a wrapper: link_bin points ~/.local/bin/claude-profile here,
+    # so a dirname "$0" wrapper would resolve its sibling against the wrong directory.
     [ -e "$BIN_DIR/claude-profile" ] || ln -s ../claude-profile.sh "$BIN_DIR/claude-profile"
     [ -n "$no_shim" ] && rm -f "$BIN_DIR/claude"
     say "installed the code to $INSTALL_DIR"

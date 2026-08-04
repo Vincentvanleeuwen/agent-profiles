@@ -822,30 +822,30 @@ eq "install is idempotent" "$(grep -c 'claude-profile\.sh' "$IRC")" "1"
 
 # Both PATH surfaces are asserted against a throwaway HOME here, not trusted
 # to the docs. --no-migrate is required: SELF_DIR is $HERE, this real checkout.
-IH="$TMP/ihome-stable"
-mkdir -p "$IH"
-env HOME="$IH" SHELL=/bin/zsh CP_RC="$IH/.zshrc" CP_ZSHENV="$IH/.zshenv" \
-    CP_LINK_DIR="$IH/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH/.claude-profile" \
+IH_STABLE="$TMP/ihome-stable"
+mkdir -p "$IH_STABLE"
+env HOME="$IH_STABLE" SHELL=/bin/zsh CP_RC="$IH_STABLE/.zshrc" CP_ZSHENV="$IH_STABLE/.zshenv" \
+    CP_LINK_DIR="$IH_STABLE/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH_STABLE/.claude-profile" \
     sh "$HERE/install.sh" --from-npm --no-migrate >"$TMP/stableout" 2>&1
 eq "install --from-npm succeeds" "$?" "0"
-check "code landed in the install dir" '[ -f "$IH/.claude-profile/claude-profile.sh" ] &&
-                                        [ -d "$IH/.claude-profile/lib" ]'
-check "surface A is on PATH"      '[ -L "$IH/.local/bin/claude-profile" ]'
-check "surface A actually runs"   'env HOME="$IH" "$IH/.local/bin/claude-profile" --help |
+check "code landed in the install dir" '[ -f "$IH_STABLE/.claude-profile/claude-profile.sh" ] &&
+                                        [ -d "$IH_STABLE/.claude-profile/lib" ]'
+check "surface A is on PATH"      '[ -L "$IH_STABLE/.local/bin/claude-profile" ]'
+check "surface A actually runs"   'env HOME="$IH_STABLE" "$IH_STABLE/.local/bin/claude-profile" --help |
                                    grep -q -- "--create"'
-check "shim installed"            '[ -x "$IH/.claude-profile/bin/claude" ]'
+check "shim installed"            '[ -x "$IH_STABLE/.claude-profile/bin/claude" ]'
 check "zshenv prepends the bin dir" \
-   'grep -qF "$IH/.claude-profile/bin" "$IH/.zshenv"'
-check "zshenv guards against a double prepend" 'grep -q "case \":\$PATH:\"" "$IH/.zshenv"'
+   'grep -qF "$IH_STABLE/.claude-profile/bin" "$IH_STABLE/.zshenv"'
+check "zshenv guards against a double prepend" 'grep -q "case \":\$PATH:\"" "$IH_STABLE/.zshenv"'
 check "rc points at the install dir" \
-   'grep -qF "$IH/.claude-profile/claude-profile.sh" "$IH/.zshrc"'
+   'grep -qF "$IH_STABLE/.claude-profile/claude-profile.sh" "$IH_STABLE/.zshrc"'
 check "--from-npm prints the migrate hint" 'grep -q -- "--migrate-store" "$TMP/stableout"'
 
-env HOME="$IH" SHELL=/bin/zsh CP_RC="$IH/.zshrc" CP_ZSHENV="$IH/.zshenv" \
-    CP_LINK_DIR="$IH/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH/.claude-profile" \
+env HOME="$IH_STABLE" SHELL=/bin/zsh CP_RC="$IH_STABLE/.zshrc" CP_ZSHENV="$IH_STABLE/.zshenv" \
+    CP_LINK_DIR="$IH_STABLE/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH_STABLE/.claude-profile" \
     sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
-eq "install is idempotent in the rc"     "$(grep -c 'claude-profile\.sh' "$IH/.zshrc")" "1"
-eq "install is idempotent in the zshenv" "$(grep -c 'claude-profile/bin' "$IH/.zshenv")" "1"
+eq "install is idempotent in the rc"     "$(grep -c 'claude-profile\.sh' "$IH_STABLE/.zshrc")" "1"
+eq "install is idempotent in the zshenv" "$(grep -c 'claude-profile/bin' "$IH_STABLE/.zshenv")" "1"
 
 # CLAUDE_PROFILE_INSTALL_DIR must never resolve to $HOME, an ancestor of it, or
 # /, or copy_code's rm -rf would wipe real directories like ~/bin or ~/lib.
@@ -897,47 +897,47 @@ check "nothing was deleted across the bypass rows" '[ -f "$IH6/bin/marker" ]'
 
 # A clone-pointing line is the state every existing user is in. Rewrite it;
 # refusing would leave them broken with no path forward.
-IH2="$TMP/ihome-oldline"
-mkdir -p "$IH2"
-printf 'source %s/claude-profile.sh\n' "$HERE" > "$IH2/.zshrc"
-env HOME="$IH2" SHELL=/bin/zsh CP_RC="$IH2/.zshrc" CP_ZSHENV="$IH2/.zshenv" \
-    CP_LINK_DIR="$IH2/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH2/.claude-profile" \
+IH_OLDLINE="$TMP/ihome-oldline"
+mkdir -p "$IH_OLDLINE"
+printf 'source %s/claude-profile.sh\n' "$HERE" > "$IH_OLDLINE/.zshrc"
+env HOME="$IH_OLDLINE" SHELL=/bin/zsh CP_RC="$IH_OLDLINE/.zshrc" CP_ZSHENV="$IH_OLDLINE/.zshenv" \
+    CP_LINK_DIR="$IH_OLDLINE/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH_OLDLINE/.claude-profile" \
     sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
 eq "install rewrites a clone-pointing rc line" "$?" "0"
-eq "only one source line remains" "$(grep -c 'claude-profile\.sh' "$IH2/.zshrc")" "1"
+eq "only one source line remains" "$(grep -c 'claude-profile\.sh' "$IH_OLDLINE/.zshrc")" "1"
 check "the remaining line points at the install dir" \
-   'grep -qF "$IH2/.claude-profile/claude-profile.sh" "$IH2/.zshrc"'
+   'grep -qF "$IH_OLDLINE/.claude-profile/claude-profile.sh" "$IH_OLDLINE/.zshrc"'
 
-IH3="$TMP/ihome-noshim"
-mkdir -p "$IH3"
-env HOME="$IH3" SHELL=/bin/zsh CP_RC="$IH3/.zshrc" CP_ZSHENV="$IH3/.zshenv" \
-    CP_LINK_DIR="$IH3/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH3/.claude-profile" \
+IH_NOSHIM="$TMP/ihome-noshim"
+mkdir -p "$IH_NOSHIM"
+env HOME="$IH_NOSHIM" SHELL=/bin/zsh CP_RC="$IH_NOSHIM/.zshrc" CP_ZSHENV="$IH_NOSHIM/.zshenv" \
+    CP_LINK_DIR="$IH_NOSHIM/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH_NOSHIM/.claude-profile" \
     sh "$HERE/install.sh" --from-npm --no-shim --no-migrate >/dev/null 2>&1
-check "--no-shim leaves no shim"   '[ ! -e "$IH3/.claude-profile/bin/claude" ]'
-check "--no-shim keeps surface A"  '[ -L "$IH3/.local/bin/claude-profile" ]'
-check "--no-shim skips the zshenv" '[ ! -f "$IH3/.zshenv" ] ||
-                                    ! grep -q "claude-profile/bin" "$IH3/.zshenv"'
+check "--no-shim leaves no shim"   '[ ! -e "$IH_NOSHIM/.claude-profile/bin/claude" ]'
+check "--no-shim keeps surface A"  '[ -L "$IH_NOSHIM/.local/bin/claude-profile" ]'
+check "--no-shim skips the zshenv" '[ ! -f "$IH_NOSHIM/.zshenv" ] ||
+                                    ! grep -q "claude-profile/bin" "$IH_NOSHIM/.zshenv"'
 
 # A clone carrying a store gets it migrated, not silently orphaned. The one
 # run in this suite without --no-migrate: $CLONE is throwaway, never $HERE.
-IH4="$TMP/ihome-migrate"
+IH_MIGRATE="$TMP/ihome-migrate"
 CLONE="$TMP/oldclone"
-mkdir -p "$IH4" "$CLONE/profiles/legacyprof"
+mkdir -p "$IH_MIGRATE" "$CLONE/profiles/legacyprof"
 cp "$HERE/claude-profile.sh" "$HERE/install.sh" "$CLONE/"
 cp -R "$HERE/lib" "$HERE/bin" "$CLONE/"
 printf '{ "x": "%s/profiles/legacyprof/statusline.sh" }\n' "$CLONE" \
     > "$CLONE/profiles/legacyprof/settings.json"
 # CLAUDE_PROFILES_DIR is exported suite-wide (line ~61); override it here or
-# it silently redirects the migrated store to $TMP/store instead of $IH4.
-env HOME="$IH4" SHELL=/bin/zsh CP_RC="$IH4/.zshrc" CP_ZSHENV="$IH4/.zshenv" \
-    CP_LINK_DIR="$IH4/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH4/.claude-profile" \
-    CLAUDE_PROFILES_DIR="$IH4/.claude-profiles" \
+# it silently redirects the migrated store to $TMP/store instead of $IH_MIGRATE.
+env HOME="$IH_MIGRATE" SHELL=/bin/zsh CP_RC="$IH_MIGRATE/.zshrc" CP_ZSHENV="$IH_MIGRATE/.zshenv" \
+    CP_LINK_DIR="$IH_MIGRATE/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH_MIGRATE/.claude-profile" \
+    CLAUDE_PROFILES_DIR="$IH_MIGRATE/.claude-profiles" \
     sh "$CLONE/install.sh" --from-npm >/dev/null 2>&1
 eq "install from a clone with a store succeeds" "$?" "0"
-check "a clone store was migrated" '[ -d "$IH4/.claude-profiles/profiles/legacyprof" ]'
+check "a clone store was migrated" '[ -d "$IH_MIGRATE/.claude-profiles/profiles/legacyprof" ]'
 check "migrated settings were rewritten" \
-   'grep -q "$IH4/.claude-profiles/profiles/legacyprof/statusline.sh" \
-      "$IH4/.claude-profiles/profiles/legacyprof/settings.json"'
+   'grep -q "$IH_MIGRATE/.claude-profiles/profiles/legacyprof/statusline.sh" \
+      "$IH_MIGRATE/.claude-profiles/profiles/legacyprof/settings.json"'
 
 # A clone whose profile has nothing baked in (no settings.json referencing
 # the old path) must still install cleanly -- migrate_clone_store's die
@@ -1162,6 +1162,39 @@ check "zshenv got the PATH block" 'grep -qF "$IH15/.mytool/bin" "$IH15/.zshenv"'
 env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >/dev/null 2>&1
 eq "uninstall (custom install dir) succeeds" "$?" "0"
 check "zshenv has no leftover PATH block" '[ ! -s "$IH15/.zshenv" ]'
+
+# --uninstall on a machine that was never installed is not an error case --
+# it is the same no-op idempotency uninstall already gets when run twice.
+IH16="$TMP/ihome-reinstall"
+mkdir -p "$IH16"
+UENV="HOME=$IH16 SHELL=/bin/zsh CP_RC=$IH16/.zshrc CP_ZSHENV=$IH16/.zshenv"
+UENV="$UENV CP_LINK_DIR=$IH16/.local/bin CLAUDE_PROFILE_INSTALL_DIR=$IH16/.claude-profile"
+UENV="$UENV CLAUDE_PROFILES_DIR=$IH16/.claude-profiles"
+
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >/dev/null 2>&1
+eq "uninstall on a never-installed machine succeeds" "$?" "0"
+check "uninstall on a never-installed machine created no install dir" \
+   '[ ! -e "$IH16/.claude-profile" ]'
+
+# The sequence a user hits when they change their mind or move machines:
+# install, uninstall, install again must land in a fully working state --
+# no stale zshenv block, no missing rc line, no symlink pointing nowhere.
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >/dev/null 2>&1
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
+eq "install after uninstall after install succeeds" "$?" "0"
+check "reinstalled code landed in the install dir" \
+   '[ -f "$IH16/.claude-profile/claude-profile.sh" ]'
+eq "reinstall has exactly one rc source line" \
+   "$(grep -c 'claude-profile\.sh' "$IH16/.zshrc")" "1"
+eq "reinstall has exactly one zshenv PATH block" \
+   "$(grep -c 'claude-profile/bin' "$IH16/.zshenv")" "1"
+check "reinstalled symlink resolves" \
+   '[ -L "$IH16/.local/bin/claude-profile" ] && [ -e "$IH16/.local/bin/claude-profile" ]'
 
 # Canary: every install.sh invocation above ran with SELF_DIR pointed at this
 # repo. If migrate_clone_store ever fires without --no-migrate honoring it,
