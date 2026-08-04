@@ -820,11 +820,8 @@ env $IRC_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1
 env $IRC_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1
 eq "install is idempotent" "$(grep -c 'claude-profile\.sh' "$IRC")" "1"
 
-# Surface A and surface B both come from the installer, so both are asserted
-# here against a throwaway HOME rather than trusted to the docs. --no-migrate
-# is required on every one of these: SELF_DIR is $HERE, the real checkout,
-# which has a real profiles/ dir, and without the flag migrate_clone_store
-# would move this repo's own profiles/ into the fake HOME under test.
+# Both PATH surfaces are asserted against a throwaway HOME here, not trusted
+# to the docs. --no-migrate is required: SELF_DIR is $HERE, this real checkout.
 IH="$TMP/ihome-stable"
 mkdir -p "$IH"
 env HOME="$IH" SHELL=/bin/zsh CP_RC="$IH/.zshrc" CP_ZSHENV="$IH/.zshenv" \
@@ -850,6 +847,24 @@ env HOME="$IH" SHELL=/bin/zsh CP_RC="$IH/.zshrc" CP_ZSHENV="$IH/.zshenv" \
 eq "install is idempotent in the rc"     "$(grep -c 'claude-profile\.sh' "$IH/.zshrc")" "1"
 eq "install is idempotent in the zshenv" "$(grep -c 'claude-profile/bin' "$IH/.zshenv")" "1"
 
+# CLAUDE_PROFILE_INSTALL_DIR must never resolve to $HOME, an ancestor of it, or
+# /, or copy_code's rm -rf would wipe real directories like ~/bin or ~/lib.
+IH5="$TMP/ihome-dangerous"
+mkdir -p "$IH5/bin"
+: > "$IH5/bin/marker"
+env HOME="$IH5" CLAUDE_PROFILE_INSTALL_DIR="$IH5" \
+    sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+eq "install refuses when INSTALL_DIR is \$HOME" "$?" "1"
+check "nothing was deleted when INSTALL_DIR is \$HOME" '[ -f "$IH5/bin/marker" ]'
+
+env HOME="$IH5/nested" CLAUDE_PROFILE_INSTALL_DIR="$IH5" \
+    sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+eq "install refuses when INSTALL_DIR is an ancestor of \$HOME" "$?" "1"
+
+env HOME="$IH5" CLAUDE_PROFILE_INSTALL_DIR=/ \
+    sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1
+eq "install refuses when INSTALL_DIR is /" "$?" "1"
+
 # A clone-pointing line is the state every existing user is in. Rewrite it;
 # refusing would leave them broken with no path forward.
 IH2="$TMP/ihome-oldline"
@@ -873,10 +888,8 @@ check "--no-shim keeps surface A"  '[ -L "$IH3/.local/bin/claude-profile" ]'
 check "--no-shim skips the zshenv" '[ ! -f "$IH3/.zshenv" ] ||
                                     ! grep -q "claude-profile/bin" "$IH3/.zshenv"'
 
-# A clone carrying a store gets it migrated, not silently orphaned. This is
-# the one install.sh run in the whole suite that must NOT pass --no-migrate:
-# it runs from a throwaway copy of the repo ($CLONE), never from $HERE, so
-# there is nothing real for auto-migration to damage.
+# A clone carrying a store gets it migrated, not silently orphaned. The one
+# run in this suite without --no-migrate: $CLONE is throwaway, never $HERE.
 IH4="$TMP/ihome-migrate"
 CLONE="$TMP/oldclone"
 mkdir -p "$IH4" "$CLONE/profiles/legacyprof"
@@ -884,10 +897,8 @@ cp "$HERE/claude-profile.sh" "$HERE/install.sh" "$CLONE/"
 cp -R "$HERE/lib" "$HERE/bin" "$CLONE/"
 printf '{ "x": "%s/profiles/legacyprof/statusline.sh" }\n' "$CLONE" \
     > "$CLONE/profiles/legacyprof/settings.json"
-# CLAUDE_PROFILES_DIR is exported earlier in this suite (line ~61) and would
-# otherwise leak into this subprocess, sending the migrated store to $TMP/store
-# instead of under $IH4. Override it explicitly rather than unsetting the
-# suite-wide export.
+# CLAUDE_PROFILES_DIR is exported suite-wide (line ~61); override it here or
+# it silently redirects the migrated store to $TMP/store instead of $IH4.
 env HOME="$IH4" SHELL=/bin/zsh CP_RC="$IH4/.zshrc" CP_ZSHENV="$IH4/.zshenv" \
     CP_LINK_DIR="$IH4/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH4/.claude-profile" \
     CLAUDE_PROFILES_DIR="$IH4/.claude-profiles" \

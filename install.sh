@@ -24,6 +24,16 @@ ZSHENV_MARK="# claude-profile PATH — added by install.sh"
 say() { printf '%s\n' "$1"; }
 die() { printf 'install: %s\n' "$1" >&2; exit 1; }
 
+# INSTALL_DIR feeds rm -rf in copy_code; refuse before it runs if it is $HOME,
+# an ancestor of $HOME, or /, where wiping breaks the whole machine.
+_id=${INSTALL_DIR%/}; [ -n "$_id" ] || _id=/
+case "$_id" in /) die "CLAUDE_PROFILE_INSTALL_DIR resolves to /" ;; esac
+[ "$_id" = "${HOME%/}" ] && die "CLAUDE_PROFILE_INSTALL_DIR is \$HOME ($HOME)"
+case "${HOME%/}" in
+    "$_id"/*) die "CLAUDE_PROFILE_INSTALL_DIR ($INSTALL_DIR) is an ancestor of \$HOME" ;;
+esac
+unset _id
+
 usage() {
     cat <<EOF
 Usage: ./install.sh [options]
@@ -211,23 +221,21 @@ fi
 
 copy_code() {
     [ "$SELF_DIR" = "$INSTALL_DIR" ] && return 0
-    mkdir -p "$INSTALL_DIR" || die "could not create $INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR" || die "could not create $INSTALL_DIR; nothing was installed"
     for _item in claude-profile.sh lib bin claude-profile.psm1; do
         [ -e "$SELF_DIR/$_item" ] || continue
         rm -rf "${INSTALL_DIR:?}/$_item"
         # -R, not -r: -R is the POSIX spelling and it copies symlinks as
         # symlinks, which is what bin/claude-profile is.
         cp -R "$SELF_DIR/$_item" "$INSTALL_DIR/$_item" \
-            || die "could not copy $_item into $INSTALL_DIR"
+            || die "could not copy $_item into $INSTALL_DIR; $INSTALL_DIR exists but the copy is incomplete"
     done
     [ -n "$no_shim" ] && rm -f "$BIN_DIR/claude"
     say "installed the code to $INSTALL_DIR"
 }
 
 # A pre-stable-install clone can carry its own store at $SELF_DIR/profiles.
-# --no-migrate exists because $SELF_DIR is this repo's own working tree in
-# our test run, and moving that out from under a live session is the one
-# thing this function must never do by accident.
+# --no-migrate exists so a live session's own $SELF_DIR/profiles is never moved by accident.
 migrate_clone_store() {
     [ -n "$no_migrate" ] && return 0
     [ "$SELF_DIR" = "$INSTALL_DIR" ] && return 0
@@ -239,9 +247,9 @@ migrate_clone_store() {
 }
 
 link_bin() {
-    mkdir -p "$LINK_DIR" || die "could not create $LINK_DIR"
+    mkdir -p "$LINK_DIR" || die "the code is installed to $INSTALL_DIR, but could not create $LINK_DIR"
     ln -sf "$BIN_DIR/claude-profile" "$LINK_DIR/claude-profile" \
-        || die "could not link $LINK_DIR/claude-profile"
+        || die "the code is installed to $INSTALL_DIR, but could not link $LINK_DIR/claude-profile"
     say "linked $LINK_DIR/claude-profile"
 }
 
@@ -259,7 +267,7 @@ add_zshenv_path() {
         printf 'case ":$PATH:" in *":%s:"*) ;; *) PATH="%s:$PATH" ;; esac\n' \
                "$BIN_DIR" "$BIN_DIR"
         printf 'export PATH\n'
-    } >> "$ZSHENV" || die "could not append to $ZSHENV"
+    } >> "$ZSHENV" || die "the code is installed and linked onto PATH, but could not append to $ZSHENV"
     say "added the PATH line to $ZSHENV"
 }
 
@@ -268,9 +276,8 @@ migrate_clone_store
 link_bin
 add_zshenv_path
 
-# Already mentioned? Then either it is our line and there is nothing to do, or
-# it points at a clone (or an old install dir) and needs repointing at the
-# tree copy_code just installed — refusing would leave no path forward.
+# Already mentioned: either it's our line already, or it points at a clone
+# and needs repointing at the tree copy_code just installed — never refuse.
 existing=$(grep -n 'claude-profile\.sh' "$rc" 2>/dev/null || true)
 if [ -n "$existing" ]; then
     if grep -qxF "$LINE" "$rc"; then
@@ -284,15 +291,16 @@ if [ -n "$existing" ]; then
                 next
             }
             { print }
-        ' "$rc" > "$_t" || { rm -f "$_t"; die "could not rewrite $rc"; }
+        ' "$rc" > "$_t" || { rm -f "$_t"; die "the code is installed and both PATH surfaces are set up, but could not rewrite $rc"; }
         if ! grep -qxF "$LINE" "$_t"; then
             rm -f "$_t"
-            die "$rc mentions claude-profile.sh in a form this script does not
-     recognise as a source line. Fix it by hand, then run this again:
+            die "the code is installed and both PATH surfaces are set up, but $rc
+     mentions claude-profile.sh in a form this script does not recognise as a
+     source line. Fix it by hand, then run this again:
 
 $(printf '%s\n' "$existing" | sed 's/^/         /')"
         fi
-        mv "$_t" "$rc" || { rm -f "$_t"; die "could not rewrite $rc"; }
+        mv "$_t" "$rc" || { rm -f "$_t"; die "the code is installed and both PATH surfaces are set up, but could not rewrite $rc"; }
         say "pointed the source line in $rc at $TARGET"
     fi
 else
