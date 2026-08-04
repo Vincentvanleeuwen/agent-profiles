@@ -932,7 +932,8 @@ printf '{ "x": "%s/profiles/legacyprof/statusline.sh" }\n' "$CLONE" \
 env HOME="$IH4" SHELL=/bin/zsh CP_RC="$IH4/.zshrc" CP_ZSHENV="$IH4/.zshenv" \
     CP_LINK_DIR="$IH4/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH4/.claude-profile" \
     CLAUDE_PROFILES_DIR="$IH4/.claude-profiles" \
-    sh "$CLONE/install.sh" --from-npm >/dev/null 2>&1 || true
+    sh "$CLONE/install.sh" --from-npm >/dev/null 2>&1
+eq "install from a clone with a store succeeds" "$?" "0"
 check "a clone store was migrated" '[ -d "$IH4/.claude-profiles/profiles/legacyprof" ]'
 check "migrated settings were rewritten" \
    'grep -q "$IH4/.claude-profiles/profiles/legacyprof/statusline.sh" \
