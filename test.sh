@@ -1063,6 +1063,33 @@ eq "install rejects an unsupported shell" "$?" "1"
 "$HERE/install.sh" --no-migrate --rc >/dev/null 2>&1
 eq "install rejects --rc with no value" "$?" "1"
 
+# --uninstall reverses an install and must leave the profile store alone.
+IH12="$TMP/ihome-uninstall"
+mkdir -p "$IH12"
+UENV="HOME=$IH12 SHELL=/bin/zsh CP_RC=$IH12/.zshrc CP_ZSHENV=$IH12/.zshenv"
+UENV="$UENV CP_LINK_DIR=$IH12/.local/bin CLAUDE_PROFILE_INSTALL_DIR=$IH12/.claude-profile"
+# The suite exports CLAUDE_PROFILES_DIR="$TMP/store" above; override it here so
+# the printed store path reflects this fixture's own home, not the shared one.
+UENV="$UENV CLAUDE_PROFILES_DIR=$IH12/.claude-profiles"
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
+mkdir -p "$IH12/.claude-profiles/profiles/keepme"
+: > "$IH12/.claude-profiles/profiles/keepme/marker"
+
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --uninstall >"$TMP/uninstout" 2>&1
+eq "uninstall succeeds" "$?" "0"
+check "install dir removed"       '[ ! -e "$IH12/.claude-profile" ]'
+check "symlink removed"           '[ ! -e "$IH12/.local/bin/claude-profile" ]'
+check "rc line removed"           '! grep -q "claude-profile\.sh" "$IH12/.zshrc"'
+check "zshenv line removed"       '! grep -q "claude-profile/bin" "$IH12/.zshenv"'
+check "store left alone"          '[ -f "$IH12/.claude-profiles/profiles/keepme/marker" ]'
+check "uninstall names the store" 'grep -qF "$IH12/.claude-profiles" "$TMP/uninstout"'
+
+# shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
+env $UENV sh "$HERE/install.sh" --uninstall >/dev/null 2>&1
+eq "uninstall is idempotent" "$?" "0"
+
 # Canary: every install.sh invocation above ran with SELF_DIR pointed at this
 # repo. If migrate_clone_store ever fires without --no-migrate honoring it,
 # this repo's own profiles/ directory disappears here, loud and immediate.

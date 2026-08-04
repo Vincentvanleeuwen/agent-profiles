@@ -51,6 +51,7 @@ Usage: ./install.sh [options]
   --no-shim          skip installing the claude shim (bin/claude)
   --no-migrate       skip migrating a store found inside this clone
   --from-npm         skip the fresh-shell check; npm has no terminal to check
+  --uninstall        reverse the install; your profile store is left alone
   -h, --help         this
 
 With no options it copies the code to $INSTALL_DIR, links claude-profile onto
@@ -73,6 +74,7 @@ want_shell=""
 no_shim=""
 no_migrate=""
 from_npm=""
+uninstall=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --rc)         [ $# -ge 2 ] || die "--rc needs a path";      rc="$2";         shift 2 ;;
@@ -80,6 +82,7 @@ while [ $# -gt 0 ]; do
         --no-shim)    no_shim=1;    shift ;;
         --no-migrate) no_migrate=1; shift ;;
         --from-npm)   from_npm=1;   shift ;;
+        --uninstall)  uninstall=1;  shift ;;
         -h|--help)    usage; exit 0 ;;
         *)            die "unknown argument $1 (try --help)" ;;
     esac
@@ -225,6 +228,37 @@ fi
 if [ ! -f "$rc" ]; then
     : > "$rc" || die "could not create $rc"
     say "created $rc"
+fi
+
+# Drop our block and any line matching a pattern, leaving the rest of the
+# file byte-for-byte. No sed -i: it is not POSIX.
+drop_lines() {
+    _f="$1"
+    _pat="$2"
+    [ -f "$_f" ] || return 0
+    _t="$_f.cp-tmp.$$"
+    grep -v "$_pat" "$_f" > "$_t"
+    _gs=$?
+    # grep exits 1 when the pattern matched every line, leaving the file
+    # empty — that's normal here, not a failure. Anything past 1 is a real error.
+    [ "$_gs" -le 1 ] || { rm -f "$_t"; die "could not rewrite $_f"; }
+    mv "$_t" "$_f" || { rm -f "$_t"; die "could not rewrite $_f"; }
+}
+
+# rm -rf "$INSTALL_DIR" needs no extra guard: the canonicalising check at the
+# top of this file already refused /, $HOME and its ancestors before any flag ran.
+if [ -n "$uninstall" ]; then
+    drop_lines "$rc" 'claude-profile\.sh'
+    drop_lines "$rc" '^# claude-profile — added by install.sh$'
+    drop_lines "$ZSHENV" 'claude-profile'
+    rm -f "$LINK_DIR/claude-profile"
+    rm -rf "$INSTALL_DIR"
+    say "removed $INSTALL_DIR, the PATH line, the rc line and the symlink"
+    say ""
+    say "Your profiles were not touched:"
+    say ""
+    say "    ${CLAUDE_PROFILES_DIR:-$HOME/.claude-profiles}"
+    exit 0
 fi
 
 copy_code() {
