@@ -3,10 +3,9 @@
 # worked. Safe to re-run: an install that is already correct is a no-op.
 #
 # The failure this exists to prevent: without that line there is no `claude`
-# shell function, so `claude profile --create dev` reaches the real Claude Code
-# binary, which knows nothing about --create and answers with a bare
-# "error: unknown option '--create'" — which says nothing about the actual
-# problem, that the tool was never installed.
+# shell function, so every session reads ~/.claude and quietly ignores whichever
+# profile you selected — a wrong answer that looks like a working install, and
+# the one failure mode here that never announces itself.
 #
 # Usage: ./install.sh [--rc <path>] [--shell bash|zsh]
 
@@ -391,7 +390,9 @@ if [ -z "$rc_explicit" ] && [ "$rc" = "$HOME/.bashrc" ]; then
 fi
 
 # Prove it. A line in a file is not an install; the test is whether the shell
-# you type into ends up with `claude` as a function.
+# you type into ends up with `claude` as a function and a `claude-profile` it can
+# reach. Both, because either alone is a half-install that only shows itself when
+# you reach for the other half.
 #
 # The shell that does the checking has to be the one whose rc was edited —
 # falling back to another would read a different startup file and pass no
@@ -418,16 +419,17 @@ if [ -z "$verify_bin" ]; then
 elif [ -n "$rc_explicit" ]; then
     # An --rc can point anywhere, and no interactive shell would read an
     # arbitrary path, so the honest claim is narrower: sourcing that file
-    # defines the wrapper. Whether anything reads it is the caller's business.
+    # defines both commands. Whether anything reads it is the caller's business.
     if "$verify_bin" -c '. "$1" || exit 1
 case $(command -v claude) in
-    claude) exit 0 ;;
+    claude) ;;
     *) exit 1 ;;
-esac' _ "$rc" >/dev/null 2>&1; then
-        say "verified: sourcing $rc defines the claude wrapper"
+esac
+[ -n "$(command -v claude-profile)" ] || exit 1' _ "$rc" >/dev/null 2>&1; then
+        say "verified: sourcing $rc defines claude and claude-profile"
         say "note: --rc given, so whether a shell reads that file was not checked"
     else
-        die "wrote $rc, but sourcing it does not define the claude wrapper.
+        die "wrote $rc, but sourcing it does not define claude and claude-profile.
      Run '. \"$TARGET\"' by hand to see the error."
     fi
 else
@@ -452,6 +454,27 @@ else
         *)
             die "wrote $rc, but a new interactive $want_shell does not define the
      claude wrapper. Run '. \"$TARGET\"' by hand to see the error." ;;
+    esac
+
+    # The other half. claude-profile has two ways to exist — the function the
+    # source line defines, and the symlink link_bin put in $LINK_DIR — and either
+    # one is a working install, so this insists on one of them rather than on
+    # which. It does insist, though: ~/.local/bin is absent from the default PATH
+    # on macOS, so the symlink on its own is not something to take on trust.
+    seen_cp=$("$verify_bin" -i -c 'command -v claude-profile' 2>/dev/null)
+    case "$seen_cp" in
+        "")
+            die "wrote $rc, but a new interactive $want_shell has no claude-profile
+     command — neither the function nor $LINK_DIR/claude-profile on PATH.
+     Run '. \"$TARGET\"' by hand to see the error." ;;
+        alias*)
+            die "an alias in $rc shadows claude-profile:
+
+         $seen_cp
+
+     Alias expansion happens before function lookup, so the alias always
+     wins. Remove it, then run this again." ;;
+        *) say "verified: claude-profile resolves to $seen_cp" ;;
     esac
 
     # Login shells read a different file, and that difference is the whole bug
@@ -482,8 +505,8 @@ say "    $LINE"
 say ""
 say "Then:"
 say ""
-say "    claude profile --create development"
-say "    claude profile development"
+say "    claude-profile --create development"
+say "    claude-profile development"
 
 # Git Bash only shadows `claude` inside Git Bash. PowerShell and cmd run
 # claude.exe directly and never see a POSIX shell function, so silently getting
@@ -498,7 +521,7 @@ case "$(uname -s 2>/dev/null)" in
         say "    powershell -File \"$SELF_DIR/install.ps1\""
         say ""
         say "Both share one store. cmd.exe cannot be supported at all — from there,"
-        say "use 'claude profile <name> -- <args>' from this shell instead."
+        say "use 'claude-profile <name> -- <args>' from this shell instead."
         ;;
 esac
 

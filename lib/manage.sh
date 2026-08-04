@@ -75,7 +75,7 @@ _cp_cmd_delete() {
     _n="$1"
     _cp_need "$_n" || return 1
     if [ "$(_cp_selected)" = "$_n" ]; then
-        printf 'claude-profile: "%s" is active; run "claude profile default" first\n' "$_n" >&2
+        printf 'claude-profile: "%s" is active; run "claude-profile default" first\n' "$_n" >&2
         return 1
     fi
     _cp_confirm "$_n" "delete profile \"$_n\"? type the name to confirm: " || return 1

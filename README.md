@@ -20,9 +20,9 @@ git clone <this repo> ~/claude-profiles
 ~/claude-profiles/install.sh
 ```
 
-Either way you end up with two things on PATH: `claude-profile`, a new
-command, and a `claude` wrapper that intercepts `claude profile ...` before it
-reaches the real binary. Both are copied into a stable `~/.claude-profile`
+Either way you end up with two things on PATH: `claude-profile`, a new command
+for managing profiles, and a `claude` wrapper that points the real binary at
+whichever profile is active. Both are copied into a stable `~/.claude-profile`
 (singular — a different directory from where your profiles themselves live,
 see [Where the data lives](#where-the-data-lives)), so nothing on PATH or in
 any rc file points into an npm/nvm prefix: changing your node version cannot
@@ -71,37 +71,40 @@ clone](#moving-off-an-old-clone) below for what else that involves.
 Start a new shell, then snapshot your current setup:
 
 ```sh
-claude profile --create development
-claude profile development
+claude-profile --create development
+claude-profile development
 ```
 
-`claude` now runs with that profile. `claude profile default` goes back to
+`claude` now runs with that profile. `claude-profile default` goes back to
 plain `~/.claude`.
 
-### Two ways to run it
+### The two commands
 
-`claude-profile <name>` and `claude profile <name>` do the same thing, but
-they're reached differently, and that difference is the whole reason both
-exist:
+`claude-profile` manages profiles — everything under
+[Commands](#commands) below. `claude` is Claude Code itself, with a wrapper in
+front that points `CLAUDE_CONFIG_DIR` at whichever profile is active. One to
+choose, one to work.
 
-| context | `claude-profile <name>` | `claude profile <name>` |
+Management has a single name and a single spelling. Launching is the half that
+has to work everywhere, and how far the wrapper reaches depends on where you are:
+
+| context | `claude-profile` | `claude` follows the active profile |
 |---|---|---|
-| interactive zsh | yes, symlink on PATH | yes, shell function |
-| `zsh -c`, zsh scripts, Claude Code's own Bash tool | yes | yes, via `.zshenv` |
-| `bash -c` | yes | no — would need `BASH_ENV`, out of scope |
-| `sh -c`, cron, GUI-launched apps | yes | no |
+| interactive zsh or bash | yes, function and symlink on PATH | yes, shell function |
+| `zsh -c`, zsh scripts, Claude Code's own Bash tool | yes, symlink on PATH | yes, via the `.zshenv` shim |
+| `bash -c` | yes, symlink on PATH | no — would need `BASH_ENV`, out of scope |
+| `sh -c`, cron, GUI-launched apps | yes, symlink on PATH | no |
 
-`claude-profile` is a plain symlink in `~/.local/bin`, a directory every one
-of those contexts inherits on PATH, so it is the one that always works.
-`claude profile` only exists where something has actually defined the
-`claude` wrapper: the shell function sourced into an interactive zsh, or a
-standalone shim reached through the `.zshenv` PATH prepend in a
-non-interactive one. Neither reaches `bash -c`, `sh -c`, cron or a
-GUI-launched tool on macOS or Linux — `claude-profile` is the answer there.
-Pass `--no-shim` to skip installing the standalone wrapper if you only want
-`claude-profile` on PATH; you still get the `claude` shell function in
-interactive zsh either way, since that comes from sourcing your rc, not from
-the shim.
+`claude-profile` is reachable two ways on purpose: sourcing your rc defines it as
+a shell function, and `install.sh` also symlinks it into `~/.local/bin`. Either
+would do in most setups — both, because `~/.local/bin` is absent from the default
+PATH on macOS, and a login shell does not always read the file the source line
+went into. Where the `claude` wrapper does not reach, a session still gets the
+right config through `claude-profile <name> -- <args>`.
+
+Pass `--no-shim` to skip installing the standalone `claude` wrapper if you only
+want `claude-profile`; you still get the `claude` shell function in an interactive
+shell either way, since that comes from sourcing your rc, not from the shim.
 
 ### Moving off an old clone
 
@@ -136,12 +139,11 @@ already moved.
 
 ### Without installing
 
-`claude profile ...` is not a Claude Code subcommand. It works because sourcing
-`claude-profile.sh` defines a shell function named `claude` that intercepts it.
-Skip that step and the arguments reach Claude Code itself, which replies
+`claude-profile` is a command this repo adds, not something Claude Code ships.
+Skip the install and there is nothing to run:
 
 ```
-error: unknown option '--create'
+claude-profile: command not found
 ```
 
 Running the script directly needs no install at all:
@@ -161,8 +163,8 @@ function already in your shell can change that. Start sessions with
 
 The wrapper is a POSIX shell function and exists only inside the shell that
 sourced it, so `install.sh` covers Git Bash and nothing else. PowerShell needs
-its own install, which defines the same `claude` command as a PowerShell
-function:
+its own install, which defines the same two commands natively — `claude` as a
+function, `claude-profile` as an alias:
 
 ```powershell
 .\install.ps1
@@ -173,7 +175,7 @@ to share one store, so that a profile created in either is visible in both —
 but that is **not currently true**. Only the Git Bash / `install.sh` half
 defaults to `~/.claude-profiles`; `install.ps1`'s store still defaults to its
 own module directory. Left on defaults, the two halves read two different
-stores and `claude profile` lists different profiles depending on which one
+stores and `claude-profile` lists different profiles depending on which one
 you're in. Until the PowerShell half is migrated too, set
 `CLAUDE_PROFILES_DIR` explicitly, to the same path, for both — and install
 from a git clone with `install.ps1`; `npm i -g claude-profiles` on Windows

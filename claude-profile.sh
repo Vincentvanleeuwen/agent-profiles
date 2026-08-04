@@ -3,10 +3,11 @@
 # POSIX sh; runs under zsh and bash.
 #
 # Two ways in. Sourced from ~/.zshrc or ~/.bashrc — what install.sh sets up —
-# every subcommand works and a bare `claude` picks up the active profile.
-# Executed instead (./claude-profile.sh --create dev) nothing needs installing,
-# and everything works except that shadowing: only a function already in your
-# shell can make a plain `claude` follow the active profile.
+# you get a `claude-profile` function for every subcommand, and a bare `claude`
+# picks up the active profile. Executed instead (./claude-profile.sh --create dev)
+# nothing needs installing, and everything works except that shadowing: only a
+# function already in your shell can make a plain `claude` follow the active
+# profile.
 #
 # This file is the entry point only: it locates lib/, sources it, and holds the
 # argument dispatch. The implementation is in lib/:
@@ -86,28 +87,28 @@ unset _cp_f
 
 _cp_cmd_help() {
     cat <<'EOF'
-claude profile                       show active profile and list all
-claude profile <name>                set the active profile
-claude profile default               clear the active profile (back to ~/.claude)
-claude profile <name> -- <args>      run one session in <name>, active unchanged
+claude-profile                       show active profile and list all
+claude-profile <name>                set the active profile
+claude-profile default               clear the active profile (back to ~/.claude)
+claude-profile <name> -- <args>      run one session in <name>, active unchanged
 
-claude profile --create <name>       snapshot the current setup into a new profile
-claude profile --update <name>       mirror the current setup into an existing profile
-claude profile --reset [name]        wipe a profile back to a fresh config (default: active)
-claude profile --delete <name>       delete a profile (backed up first)
-claude profile --rename <a> <b>      rename a profile
-claude profile --copy <a> <b>        duplicate a profile
+claude-profile --create <name>       snapshot the current setup into a new profile
+claude-profile --update <name>       mirror the current setup into an existing profile
+claude-profile --reset [name]        wipe a profile back to a fresh config (default: active)
+claude-profile --delete <name>       delete a profile (backed up first)
+claude-profile --rename <a> <b>      rename a profile
+claude-profile --copy <a> <b>        duplicate a profile
 
-claude profile --show <name>         model, plugins, skills, hooks, mcp servers
-claude profile --diff <a> <b>        the same, for two profiles
+claude-profile --show <name>         model, plugins, skills, hooks, mcp servers
+claude-profile --diff <a> <b>        the same, for two profiles
 
-claude profile --export <name> [f]   tarball to exports/ (no credentials)
-claude profile --import <file> [n]   create a profile from a tarball
+claude-profile --export <name> [f]   tarball to exports/ (no credentials)
+claude-profile --import <file> [n]   create a profile from a tarball
 
-claude profile --install-statusline    show the running profile (or default) in your statusline
-claude profile --uninstall-statusline  remove it
+claude-profile --install-statusline    show the running profile (or default) in your statusline
+claude-profile --uninstall-statusline  remove it
 
-claude profile --migrate-store <dir>   move a store out of an old clone
+claude-profile --migrate-store <dir>   move a store out of an old clone
 
 Resolution order: $CLAUDE_PROFILE, then .claude-profile walking up from the
 current directory, then the active profile, then ~/.claude.
@@ -152,19 +153,31 @@ _cp_main() {
     esac
 }
 
+# The whole reason the source line is worth having: a `claude` that follows the
+# active profile rather than always reading ~/.claude. Management lives in
+# claude-profile, not behind a subcommand of this.
 claude() {
-    if [ "${1:-}" = profile ]; then
-        shift
-        _cp_main "$@"
-        return $?
-    fi
     _cp_launch "$(_cp_resolve)" "$@"
 }
 
+# The management surface, as a function and not only as the symlink install.sh
+# puts on PATH. Sourcing is the thing install.sh guarantees; PATH is not —
+# ~/.local/bin is absent from the default PATH on macOS — and a management
+# command that exists in some shells and not others is worse than either.
+#
+# Through eval because a hyphen is legal in a bash or zsh function name and a
+# parse error in dash and macOS sh: inside a string it is not parsed until the
+# eval runs, which is what keeps `dash -n` on this file working. Guarded on the
+# shell rather than attempted and recovered from, since a parse error is fatal
+# at parse time and there is nothing to catch.
+if [ -n "${BASH_VERSION:-}${ZSH_VERSION:-}" ]; then
+    eval 'claude-profile() { _cp_main "$@"; }'
+fi
+
 # Executed rather than sourced: take the arguments straight to the dispatcher,
-# so a fresh clone works before anything has been added to a shell rc. The
-# `claude` function above is defined either way and simply goes unused here —
-# nothing outside this process can see it.
+# so a fresh clone works before anything has been added to a shell rc. The two
+# functions above are defined either way and simply go unused here — nothing
+# outside this process can see them.
 if [ -n "${_CP_EXEC:-}" ]; then
     _cp_main "$@"
     exit $?

@@ -270,51 +270,66 @@ function Start-CpClaude {
     $global:LASTEXITCODE = $code
 }
 
-function claude {
+# The management surface: everything that is not "start a session".
+#
+# Reached as `claude-profile` through the alias below rather than by being named
+# that outright. PowerShell reads every hyphenated command name as Verb-Noun and
+# warns at import time when the verb is not one of its approved ones -- "claude"
+# will never be one -- and since the line install.ps1 writes into $PROFILE is a
+# plain Import-Module, that warning would print on every session start. Aliases
+# are not verb-checked, so this is the one spelling that stays quiet.
+function Invoke-CpProfile {
     # No param block and no [CmdletBinding()] on purpose. Both would make
     # PowerShell try to bind --create, -p and friends as parameters of this
     # function; with neither, every token lands in $args untouched.
     $rest = @($args)
 
-    if ($rest.Count -ge 1 -and $rest[0] -eq 'profile') {
-        $sub = if ($rest.Count -gt 1) { @($rest[1..($rest.Count - 1)]) } else { @() }
-
-        # `claude profile <name> -- <args>`: one session in <name>, active
-        # profile untouched. Kept native because the thing it ends in is an
-        # interactive TUI, which cannot be run down a non-interactive bash -c.
-        #
-        # The separator cannot be tested for. PowerShell's parser treats a bare
-        # `--` as end-of-parameters and consumes it when calling a function, so
-        # `claude profile dev -- --version` arrives here as just dev, --version.
-        # Quoting it ('--') does survive, and so does a second one, which is why
-        # the strip below is conditional rather than assumed.
-        #
-        # Detecting the form by shape instead is safe: the setter takes exactly
-        # one argument, so a bare name followed by anything at all can only have
-        # come from a separator that was eaten. Reading it as a set would take
-        # the trailing arguments and silently drop them.
-        if ($sub.Count -ge 2 -and -not $sub[0].StartsWith('-')) {
-            $name = $sub[0]
-            $from = if ($sub[1] -eq '--') { 2 } else { 1 }
-            $runArgs = if ($sub.Count -gt $from) { @($sub[$from..($sub.Count - 1)]) } else { @() }
-            $dir = Get-CpProfileDir $name
-            if (-not (Test-CpValidName $name) -or -not (Test-Path -LiteralPath $dir -PathType Container)) {
-                Write-CpError ('claude-profile: no such profile "{0}"' -f $name)
-                $global:LASTEXITCODE = 1
-                return
-            }
-            Start-CpClaude $dir $runArgs
+    # `claude-profile <name> -- <args>`: one session in <name>, active profile
+    # untouched. Kept native because the thing it ends in is an interactive TUI,
+    # which cannot be run down a non-interactive bash -c.
+    #
+    # The separator cannot be tested for. PowerShell's parser treats a bare `--`
+    # as end-of-parameters and consumes it when calling a function, so
+    # `claude-profile dev -- --version` arrives here as just dev, --version.
+    # Quoting it ('--') does survive, and so does a second one, which is why the
+    # strip below is conditional rather than assumed.
+    #
+    # Detecting the form by shape instead is safe: the setter takes exactly one
+    # argument, so a bare name followed by anything at all can only have come
+    # from a separator that was eaten. Reading it as a set would take the
+    # trailing arguments and silently drop them.
+    if ($rest.Count -ge 2 -and -not $rest[0].StartsWith('-')) {
+        $name = $rest[0]
+        $from = if ($rest[1] -eq '--') { 2 } else { 1 }
+        $runArgs = if ($rest.Count -gt $from) { @($rest[$from..($rest.Count - 1)]) } else { @() }
+        $dir = Get-CpProfileDir $name
+        if (-not (Test-CpValidName $name) -or -not (Test-Path -LiteralPath $dir -PathType Container)) {
+            Write-CpError ('claude-profile: no such profile "{0}"' -f $name)
+            $global:LASTEXITCODE = 1
             return
         }
-
-        # Everything else is management. bash inherits this process's working
-        # directory, so even bare `claude profile` walks up for a .claude-profile
-        # from where you actually are and reports the same answer we would.
-        Invoke-CpBash $sub
+        Start-CpClaude $dir $runArgs
         return
     }
 
-    Start-CpClaude (Resolve-CpConfigDir) $rest
+    # Everything else is management. bash inherits this process's working
+    # directory, so even a bare `claude-profile` walks up for a .claude-profile
+    # from where you actually are and reports the same answer we would.
+    Invoke-CpBash $rest
 }
 
-Export-ModuleMember -Function claude
+Set-Alias -Name claude-profile -Value Invoke-CpProfile
+
+# The whole reason the import line is worth having: a `claude` that follows the
+# active profile rather than always reading ~/.claude. Management lives in
+# claude-profile, not behind a subcommand of this.
+function claude {
+    # No param block and no [CmdletBinding()] on purpose, for the same reason as
+    # Invoke-CpProfile above: every token has to reach $args untouched.
+    Start-CpClaude (Resolve-CpConfigDir) @($args)
+}
+
+# Invoke-CpProfile is exported alongside its alias deliberately. An exported
+# alias whose target is not itself exported is resolvable only from inside the
+# module's session state, which is not where anyone types.
+Export-ModuleMember -Function claude, Invoke-CpProfile -Alias claude-profile

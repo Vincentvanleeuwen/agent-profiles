@@ -1,13 +1,13 @@
 #!/bin/sh
-# Surface B: `claude profile ...` for shells that never read an rc file.
+# Surface B: a `claude` that follows the active profile in shells that never read
+# an rc file, and so never get the sourced function.
 # ponytail: resolves siblings via $0, so symlinking this file elsewhere breaks it.
+#
+# Management is deliberately not reachable through here. claude-profile is its
+# own command, sitting next to this file and reaching PATH by the same means, so
+# a subcommand of this would only be a second name for it.
 set -u
 
 _cp_entry="$(dirname "$0")/../claude-profile.sh"
-
-if [ "${1:-}" = profile ]; then
-    shift
-    exec "$_cp_entry" "$@"
-fi
 
 exec "$_cp_entry" --run-active "$@"
