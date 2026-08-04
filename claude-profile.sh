@@ -1,5 +1,12 @@
+#!/bin/sh
 # claude-profile — switch Claude Code between named configuration profiles.
-# Source this from ~/.zshrc or ~/.bashrc. POSIX sh; runs under zsh and bash.
+# POSIX sh; runs under zsh and bash.
+#
+# Two ways in. Sourced from ~/.zshrc or ~/.bashrc — what install.sh sets up —
+# every subcommand works and a bare `claude` picks up the active profile.
+# Executed instead (./claude-profile.sh --create dev) nothing needs installing,
+# and everything works except that shadowing: only a function already in your
+# shell can make a plain `claude` follow the active profile.
 #
 # This file is the entry point only: it locates lib/, sources it, and holds the
 # argument dispatch. The implementation is in lib/:
@@ -12,10 +19,36 @@
 #   inspect.sh     show, diff, export, import
 #   statusline.sh  the ~/.claude/statusline.sh block
 
-# Path of this file when sourced. $BASH_SOURCE is set under bash; the zsh
-# fallback ${(%):-%x} is only ever expanded when it is not, so bash never
-# parses it as a value.
-_CP_SELF="${BASH_SOURCE:-${(%):-%x}}"
+# Path of this file, and whether we were executed or sourced.
+#
+# Executed, $0 is this file in every shell. Sourced, $0 belongs to the caller
+# and each shell has to be asked its own way. Branching rather than nesting the
+# fallbacks in one expansion is what keeps ${(%):-%x} away from dash, which
+# parses it happily and then cannot expand it.
+if [ -n "${BASH_SOURCE:-}" ]; then
+    _CP_SELF="$BASH_SOURCE"
+    [ "$BASH_SOURCE" = "$0" ] && _CP_EXEC=1
+elif [ -n "${ZSH_VERSION:-}" ]; then
+    # The redundant-looking ${BASH_SOURCE:-...} wrapper is load-bearing: dash
+    # parses the nested form but rejects a bare ${(%):-%x} outright, and this
+    # file has to survive `dash -n` even though dash never runs this branch.
+    # BASH_SOURCE is empty here by definition, so zsh always takes the fallback.
+    _CP_SELF="${BASH_SOURCE:-${(%):-%x}}"
+    case "${ZSH_EVAL_CONTEXT:-}" in
+        *file*) ;;
+        *) _CP_EXEC=1 ;;
+    esac
+else
+    # Plain sh: no BASH_SOURCE, no %x, so a sourced copy cannot find itself at
+    # all and only the executed case is supportable — which is the one $0
+    # answers. Matching the name rather than assuming keeps a source under dash
+    # from running _cp_main on the caller's arguments.
+    _CP_SELF="$0"
+    case "$0" in
+        claude-profile|claude-profile.sh|*/claude-profile|*/claude-profile.sh)
+            _CP_EXEC=1 ;;
+    esac
+fi
 _CP_HOME=$(cd "$(dirname "$_CP_SELF")" && pwd)
 
 # Directory holding this file with symlinks resolved, so lib/ is still findable
@@ -48,6 +81,9 @@ for _cp_f in resolve build profile commands manage inspect statusline; do
     else
         printf 'claude-profile: cannot read %s/%s.sh; not loading\n' "$_CP_LIB" "$_cp_f" >&2
         unset _cp_f
+        # `return` outside a function is an error in an executed script, so the
+        # way out depends on how we got here.
+        if [ -n "${_CP_EXEC:-}" ]; then exit 1; fi
         return 1
     fi
 done
@@ -97,6 +133,11 @@ _cp_main() {
         --import)           shift; _cp_cmd_import "$@" ;;
         --install-statusline)   _cp_cmd_install_statusline ;;
         --uninstall-statusline) _cp_cmd_uninstall_statusline ;;
+        # Internal, and deliberately absent from --help: it is a hook, not a
+        # command. The PowerShell wrapper starts claude itself — a TUI cannot be
+        # run through a non-interactive `bash -c` — so it has no _cp_launch to
+        # hang the prompt-state sync off, and calls this on either side instead.
+        --sync-prompts)     shift; _cp_sync_prompts "$@" ;;
         -h|--help)          _cp_cmd_help ;;
         -*)                 printf 'claude-profile: unknown option %s\n' "$1" >&2; return 1 ;;
         *)
@@ -119,3 +160,12 @@ claude() {
     fi
     _cp_launch "$(_cp_resolve)" "$@"
 }
+
+# Executed rather than sourced: take the arguments straight to the dispatcher,
+# so a fresh clone works before anything has been added to a shell rc. The
+# `claude` function above is defined either way and simply goes unused here —
+# nothing outside this process can see it.
+if [ -n "${_CP_EXEC:-}" ]; then
+    _cp_main "$@"
+    exit $?
+fi

@@ -548,7 +548,7 @@ check "parses under bash"  'bash -n "$HERE/claude-profile.sh"'
 check_with "parses under zsh" zsh 'zsh -n "$HERE/claude-profile.sh"'
 # Suppressions and shell= live in .shellcheckrc, so this stays a bare invocation.
 check_with "passes shellcheck" shellcheck \
-  'shellcheck "$HERE/claude-profile.sh" "$HERE"/lib/*.sh "$HERE/test.sh"'
+  'shellcheck "$HERE/claude-profile.sh" "$HERE/install.sh" "$HERE"/lib/*.sh "$HERE/test.sh"'
 # Excludes POSIX character classes like [[:space:]] ("[[" followed by ":"),
 # which are legitimate sh and not the bash [[ ]] test bashism.
 check "no bashisms: no [[" '! grep -qE "\[\[[^:]" "$HERE/claude-profile.sh"'
@@ -757,6 +757,174 @@ eq "sync succeeds with no .claude.json" "$?" "0"
 check "sync creates no .claude.json out of nothing" \
    '[ ! -f "$TMP/ps/empty/.claude.json" ]'
 rm -rf "$TMP/ps"
+
+echo "== Task 16: running without sourcing, and install.sh =="
+
+# The entry script has to work executed as well as sourced, so that a fresh
+# clone does something useful before anything touches a shell rc. These run it
+# as a subprocess, which is the only honest way to test the executed path.
+CPX="$HERE/claude-profile.sh"
+XENV="HOME=$FAKEHOME CLAUDE_PROFILES_DIR=$TMP/xstore"
+mkdir -p "$TMP/xstore"
+
+check "entry script is executable" '[ -x "$CPX" ]'
+check "entry script has a shebang" 'head -1 "$CPX" | grep -q "^#!"'
+
+check "executed --help prints usage" \
+   'env $XENV "$CPX" --help | grep -q -- "--create"'
+check "executed bare prints status" \
+   'env $XENV "$CPX" | grep -q "^store: "'
+check "executed --create builds a profile" \
+   'env $XENV "$CPX" --create xprof >/dev/null && [ -d "$TMP/xstore/profiles/xprof" ]'
+check "executed --create is visible to a later run" \
+   'env $XENV "$CPX" | grep -q "xprof"'
+env $XENV "$CPX" --nope >/dev/null 2>&1
+eq "executed unknown option exits 1" "$?" "1"
+
+# The tail dispatch keys off _CP_EXEC. If that leaks into the sourced case, a
+# login shell would run _cp_main on whatever happened to be in $@ — so assert
+# the negative, not just that sourcing works.
+check "sourcing defines the claude wrapper" \
+   'bash -c ". \"$CPX\"; case \$(command -v claude) in claude) exit 0 ;; *) exit 1 ;; esac"'
+check "sourcing with args does not dispatch" \
+   'bash -c "cd \"$TMP\" && set -- --create LEAK && . \"$CPX\"" >/dev/null 2>&1 &&
+    [ ! -d "$TMP/xstore/profiles/LEAK" ]'
+check_with "sourcing under dash does not dispatch" dash \
+   'dash -c "cd \"$HERE\" && . ./claude-profile.sh" >/dev/null 2>&1;
+    [ ! -d "$TMP/xstore/profiles/dash" ]'
+
+# CRLF is the specific way this breaks: a "#!/bin/sh\r" shebang is a fatal
+# "bad interpreter" on Linux, and dash will not read "then\r" as `then`.
+# .gitattributes pins it, and this catches a checkout that ignored it.
+check "entry script has no CR bytes" '! grep -q "$(printf "\r")" "$CPX"'
+check "install.sh has no CR bytes"   '! grep -q "$(printf "\r")" "$HERE/install.sh"'
+check ".gitattributes pins sh to lf" \
+   'grep -q "\*\.sh text eol=lf" "$HERE/.gitattributes"'
+
+check "install.sh is executable" '[ -x "$HERE/install.sh" ]'
+check_with "install.sh parses under dash" dash 'dash -n "$HERE/install.sh"'
+
+# CP_RC is the seam that keeps these off the real ~/.zshrc.
+IRC="$TMP/fakerc"
+: > "$IRC"
+check "install writes the source line" \
+   'CP_RC="$IRC" "$HERE/install.sh" >/dev/null 2>&1 && grep -qF "claude-profile.sh" "$IRC"'
+CP_RC="$IRC" "$HERE/install.sh" >/dev/null 2>&1
+CP_RC="$IRC" "$HERE/install.sh" >/dev/null 2>&1
+eq "install is idempotent" "$(grep -c 'claude-profile\.sh' "$IRC")" "1"
+
+# Stop and explain, rather than edit a line it did not write.
+printf 'source ~/elsewhere/claude-profile.sh\n' > "$TMP/conflictrc"
+CP_RC="$TMP/conflictrc" "$HERE/install.sh" >/dev/null 2>&1
+eq "install refuses a conflicting line" "$?" "1"
+eq "install left the conflicting rc alone" \
+   "$(cat "$TMP/conflictrc")" "source ~/elsewhere/claude-profile.sh"
+
+# $SHELL is the login shell from the password database, not the shell you are
+# typing into. Keying off it alone made this exit 1 on every container, WSL
+# image and `su` session, where it is commonly /bin/sh — the regression that
+# these four pin down.
+IH="$TMP/ihome"; mkdir -p "$IH"; : > "$IH/.bashrc"
+check "install works when \$SHELL is /bin/sh" \
+   'env HOME="$IH" SHELL=/bin/sh bash "$HERE/install.sh" >/dev/null 2>&1 &&
+    grep -qF "claude-profile.sh" "$IH/.bashrc"'
+
+IH2="$TMP/ihome2"; mkdir -p "$IH2"; : > "$IH2/.zshrc"
+check "install picks .zshrc for a zsh login shell" \
+   'env HOME="$IH2" SHELL=/bin/zsh sh "$HERE/install.sh" >/dev/null 2>&1 &&
+    grep -qF "claude-profile.sh" "$IH2/.zshrc"'
+
+# A named shell with no rc yet is a fresh account, not an ambiguity.
+IH3="$TMP/ihome3"; mkdir -p "$IH3"
+check "install creates a missing rc for a known shell" \
+   'env HOME="$IH3" SHELL=/bin/zsh sh "$HERE/install.sh" >/dev/null 2>&1 &&
+    [ -f "$IH3/.zshrc" ]'
+
+# Two candidates and nothing to choose between them is where it must stop.
+IH4="$TMP/ihome4"; mkdir -p "$IH4"; : > "$IH4/.zshrc"; : > "$IH4/.bashrc"
+env HOME="$IH4" sh -c "SHELL=/bin/sh exec \"$HERE/install.sh\"" >/dev/null 2>&1
+eq "install stops when both rc files exist and \$SHELL is unhelpful" "$?" "1"
+check "install left both candidate rc files alone" \
+   '[ ! -s "$IH4/.zshrc" ] && [ ! -s "$IH4/.bashrc" ]'
+
+# Bash reads .bashrc for interactive non-login shells and nothing else. A bare
+# account or container image has no login file at all, so the source line goes
+# in and `bash -l`, `su -` and most container entrypoints never see it — an
+# install that reports success and does nothing. zsh has no equivalent gap.
+IH7="$TMP/ihome7"; mkdir -p "$IH7"
+env HOME="$IH7" SHELL=/bin/bash sh "$HERE/install.sh" >/dev/null 2>&1
+eq "install succeeds on a bare HOME" "$?" "0"
+check "install adds a login hook on a bare HOME" \
+   '[ -f "$IH7/.bash_profile" ] && grep -q "\.bashrc" "$IH7/.bash_profile"'
+# No `exit` in a check expression: check() evals it in this shell, so an exit
+# here ends the run rather than the case.
+check_with "a login shell reaches the wrapper" bash \
+   '[ "$(env HOME="$IH7" bash -l -i -c "command -v claude" 2>/dev/null)" = claude ]'
+
+# Writing .bash_profile is only safe when the whole login chain is empty. Debian
+# ships a ~/.profile that already sources .bashrc, and bash reads just the first
+# of .bash_profile/.bash_login/.profile — so adding one would shadow it.
+IH8="$TMP/ihome8"; mkdir -p "$IH8"; : > "$IH8/.bashrc"
+printf 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi\n' > "$IH8/.profile"
+env HOME="$IH8" SHELL=/bin/bash sh "$HERE/install.sh" >/dev/null 2>&1
+eq "install accepts a .profile that sources .bashrc" "$?" "0"
+check "install does not shadow .profile with .bash_profile" \
+   '[ ! -f "$IH8/.bash_profile" ]'
+
+# A login file that exists but does not source .bashrc is someone else's, the
+# same as a source line this script did not write: say what to add, change
+# nothing, and do not exit 0 on a half-reachable install.
+IH9="$TMP/ihome9"; mkdir -p "$IH9"; : > "$IH9/.bashrc"
+printf 'export FOO=1\n' > "$IH9/.bash_profile"
+env HOME="$IH9" SHELL=/bin/bash sh "$HERE/install.sh" >/dev/null 2>&1
+eq "install reports a login shell it cannot reach" "$?" "1"
+eq "install left the login file alone" "$(cat "$IH9/.bash_profile")" "export FOO=1"
+
+# Alias expansion happens before function lookup, so an alias wins over the
+# wrapper however correct the install is. Aliases exist only in interactive
+# shells, which is the other reason the check has to start one.
+IH10="$TMP/ihome10"; mkdir -p "$IH10"
+printf 'alias claude=echo\n' > "$IH10/.bashrc"
+printf 'if [ -f ~/.bashrc ]; then . ~/.bashrc; fi\n' > "$IH10/.profile"
+env HOME="$IH10" SHELL=/bin/bash sh "$HERE/install.sh" >"$TMP/aliasout" 2>&1
+eq "install fails when an alias shadows the wrapper" "$?" "1"
+check "install names the alias it found" 'grep -q "alias" "$TMP/aliasout"'
+
+# Checking a zsh install by running bash would read .bashrc rather than the
+# .zshrc just written and pass no matter what. Saying so is the honest answer.
+if command -v zsh >/dev/null 2>&1; then
+    skip "install skips the load check without the target shell" zsh-absent
+else
+    IH11="$TMP/ihome11"; mkdir -p "$IH11"; : > "$IH11/.zshrc"
+    env HOME="$IH11" SHELL=/bin/zsh sh "$HERE/install.sh" >"$TMP/zshout" 2>&1
+    eq "install without the target shell still succeeds" "$?" "0"
+    check "install skips the load check without the target shell" \
+       'grep -q "skipping the load check" "$TMP/zshout"'
+fi
+
+# An --rc can name a file no shell reads, so the claim has to shrink to what
+# was actually established: sourcing it works, reachability is unknown.
+check "an explicit --rc does not claim reachability" \
+   'CP_RC="$TMP/explicitrc" "$HERE/install.sh" 2>&1 | grep -q "was not checked"'
+
+check "install honours --shell" \
+   'env HOME="$TMP/ihome5" sh -c "mkdir -p \"$TMP/ihome5\"" &&
+    env HOME="$TMP/ihome5" SHELL=/bin/sh sh "$HERE/install.sh" --shell bash >/dev/null 2>&1 &&
+    grep -qF "claude-profile.sh" "$TMP/ihome5/.bashrc"'
+check "install honours --rc" \
+   'env HOME="$TMP/ihome6" sh "$HERE/install.sh" --rc "$TMP/ihome6rc" >/dev/null 2>&1 &&
+    grep -qF "claude-profile.sh" "$TMP/ihome6rc"'
+
+"$HERE/install.sh" --help >/dev/null 2>&1
+eq "install --help exits 0" "$?" "0"
+"$HERE/install.sh" --bogus >/dev/null 2>&1
+eq "install rejects an unknown flag" "$?" "1"
+"$HERE/install.sh" --shell fish >/dev/null 2>&1
+eq "install rejects an unsupported shell" "$?" "1"
+"$HERE/install.sh" --rc >/dev/null 2>&1
+eq "install rejects --rc with no value" "$?" "1"
+
+rm -rf "$TMP/xstore"
 
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
