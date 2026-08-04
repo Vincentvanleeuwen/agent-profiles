@@ -648,7 +648,7 @@ check "build from base with no dot-entries produced settings.json" \
    '[ -f "$TMP/h2build/settings.json" ]'
 rm -rf "$FRESH" "$TMP/h2build"
 
-# A store with zero profiles must not abort `claude profile` status either.
+# A store with zero profiles must not abort `claude-profile` status either.
 mkdir -p "$TMP/h2store/profiles"
 out=$(CLAUDE_PROFILES_DIR="$TMP/h2store" _cp_main 2>&1)
 eq "status with zero profiles succeeds" "$?" "0"
@@ -789,6 +789,32 @@ eq "executed unknown option exits 1" "$?" "1"
 # the negative, not just that sourcing works.
 check "sourcing defines the claude wrapper" \
    'bash -c ". \"$CPX\"; case \$(command -v claude) in claude) exit 0 ;; *) exit 1 ;; esac"'
+
+# The management surface is a function as well as the symlink on PATH: sourcing
+# is what install.sh guarantees, ~/.local/bin is not on the default macOS PATH,
+# and the two surfaces must not disagree about whether the command exists. Both
+# shells are checked because the definition goes through eval — a hyphenated
+# function name is a parse error in dash and macOS sh — and a mistake inside an
+# eval string is invisible to `dash -n` and to shellcheck alike.
+check_with "sourcing defines claude-profile under bash" bash \
+   'bash -c ". \"$CPX\"; case \$(command -v claude-profile) in claude-profile) exit 0 ;; *) exit 1 ;; esac"'
+check_with "sourcing defines claude-profile under zsh" zsh \
+   'zsh -c ". \"$CPX\"; case \$(command -v claude-profile) in claude-profile) exit 0 ;; *) exit 1 ;; esac"'
+check_with "sourced claude-profile reaches the dispatcher" bash \
+   'env $XENV bash -c ". \"$CPX\"; claude-profile" | grep -q "^store: "'
+
+# `claude` launches sessions and nothing else now, so `profile` is an ordinary
+# argument and has to arrive at the runner rather than be eaten as a subcommand.
+# Asserting where it lands, not merely that nothing failed: an argument silently
+# swallowed by a leftover branch would exit 0 too.
+printf '#!/bin/sh\nprintf "ARGS=%%s\\n" "$*"\n' > "$TMP/argsrunner"
+chmod +x "$TMP/argsrunner"
+# shellcheck disable=SC2086 # $XENV holds space-separated KEY=VALUE pairs for env to split
+out=$(env $XENV _CP_RUNNER="$TMP/argsrunner" \
+      bash -c ". \"$CPX\"; claude profile --create x" 2>&1)
+check "sourced claude does not treat profile as a subcommand" \
+   'echo "$out" | grep -q "ARGS=profile --create x" && [ ! -d "$TMP/xstore/profiles/x" ]'
+
 check "sourcing with args does not dispatch" \
    'bash -c "cd \"$TMP\" && set -- --create LEAK && . \"$CPX\"" >/dev/null 2>&1 &&
     [ ! -d "$TMP/xstore/profiles/LEAK" ]'
@@ -1030,6 +1056,26 @@ check "install adds a login hook on a bare HOME" \
 # here ends the run rather than the case.
 check_with "a login shell reaches the wrapper" bash \
    '[ "$(env HOME="$IH7" bash -l -i -c "command -v claude" 2>/dev/null)" = claude ]'
+
+# The installs above all satisfy the claude-profile half of the verify step, and
+# on a developer's machine they would satisfy it even if the check were vacuous:
+# a real ~/.local/bin/claude-profile is already on PATH. So prove the assertion
+# bites. The fixture is an entry script that defines the wrapper and nothing
+# else, with PATH cut back to the system directories so no installed copy can
+# answer for it — reproduce the failure, or the check is only decoration.
+IHCP="$TMP/ihome-cp"; mkdir -p "$IHCP"; : > "$IHCP/.bashrc"
+CPSTUB="$TMP/cpstub"; mkdir -p "$CPSTUB/lib" "$CPSTUB/bin"
+printf 'claude() { :; }\n' > "$CPSTUB/claude-profile.sh"
+: > "$CPSTUB/bin/claude"
+cp "$HERE/install.sh" "$CPSTUB/install.sh"
+env HOME="$IHCP" SHELL=/bin/bash PATH="/usr/bin:/bin" \
+    CLAUDE_PROFILE_INSTALL_DIR="$TMP/cpstub-install" \
+    CP_LINK_DIR="$TMP/cpstub-install/.local/bin" \
+    CP_ZSHENV="$TMP/cpstub-install/.zshenv" \
+    sh "$CPSTUB/install.sh" --no-migrate >"$TMP/cpstubout" 2>&1
+eq "install fails when claude-profile is unreachable" "$?" "1"
+check "the failure names the missing command" \
+   'grep -q "no claude-profile" "$TMP/cpstubout"'
 
 # Writing .bash_profile is only safe when the whole login chain is empty. Debian
 # ships a ~/.profile that already sources .bashrc, and bash reads just the first
@@ -1390,9 +1436,14 @@ out=$(env $XENV _CP_RUNNER="$TMP/fakerunner" "$HERE/bin/claude" --version 2>&1)
 check "shim launches the active profile" \
    'echo "$out" | grep -q "CFG=$TMP/xstore/profiles/shimprof ARGS=--version"'
 
+# The shim launches sessions and nothing else: `profile` reaches claude as an
+# ordinary argument instead of selecting a management subcommand. Checked against
+# the runner's ARGS rather than by the absence of an error, since a stray branch
+# that ate the word would also leave the exit status at 0.
 # shellcheck disable=SC2086 # $XENV holds space-separated KEY=VALUE pairs for env to split
-out=$(env $XENV "$HERE/bin/claude" profile 2>&1)
-check "shim passes 'profile' through to the wrapper" 'echo "$out" | grep -q "^store: "'
+out=$(env $XENV _CP_RUNNER="$TMP/fakerunner" "$HERE/bin/claude" profile --create x 2>&1)
+check "shim does not treat 'profile' as a subcommand" \
+   'echo "$out" | grep -q "ARGS=profile --create x" && [ ! -d "$TMP/xstore/profiles/x" ]'
 
 # shellcheck disable=SC2086 # $XENV holds space-separated KEY=VALUE pairs for env to split
 out=$(env $XENV _CP_RUNNER="$TMP/fakerunner" "$CPX" --run-active -p hi 2>&1)

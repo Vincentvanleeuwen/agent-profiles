@@ -182,10 +182,17 @@ from a git clone with `install.ps1`; `npm i -g claude-profiles` on Windows
 does not run it (see [Install](#install)).
 
 `install.ps1` edits `$PROFILE`, checks that a fresh PowerShell really does end
-up with `claude` as a function, and warns if your execution policy is
+up with both commands defined, and warns if your execution policy is
 `Restricted` or `AllSigned` — under those, PowerShell never reads your profile
 and the wrapper is never defined. It will not change the policy for you; the fix
 is `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+`claude-profile` is an alias rather than a function because PowerShell reads any
+hyphenated name as `Verb-Noun` and warns on import when the verb is not one of its
+approved ones — which "claude" will never be. Aliases are not verb-checked, so
+this is the spelling that does not print a warning every time you open a shell.
+`Get-Command claude-profile` reports it as an `Alias` for `Invoke-CpProfile`;
+both names work.
 
 Only two things are reimplemented in PowerShell: working out which profile is
 selected, and starting `claude.exe` with `CLAUDE_CONFIG_DIR` set. Every
@@ -200,7 +207,7 @@ One syntax difference, forced by the PowerShell parser: it treats a bare `--` as
 end-of-parameters and eats it before the function is called, so
 
 ```powershell
-claude profile finance -- --version
+claude-profile finance -- --version
 ```
 
 arrives as `finance --version`, with the separator already gone. It works
@@ -220,22 +227,22 @@ See [Uninstall](#uninstall) for removing either half.
 
 | Command | Does |
 |---|---|
-| `claude profile` | Active profile, why it was selected, and the full list |
-| `claude profile <name>` | Set the active profile |
-| `claude profile default` | Clear it; back to plain `~/.claude` |
-| `claude profile <name> -- <args>` | One session in `<name>`; active unchanged |
-| `claude profile --create <name>` | Snapshot the current setup |
-| `claude profile --update <name>` | Mirror the current setup into `<name>` |
-| `claude profile --reset [name]` | Wipe `<name>` (default: active) back to a first-run config; old contents moved to `.backups/`. Shared paths stay linked, so you stay logged in |
-| `claude profile --delete <name>` | Delete (moved to `.backups/`) |
-| `claude profile --rename <a> <b>` | Rename |
-| `claude profile --copy <a> <b>` | Duplicate |
-| `claude profile --show <name>` | Model, plugins, skills, hooks, MCP servers |
-| `claude profile --diff <a> <b>` | The same, side by side |
-| `claude profile --export <name> [file]` | Shareable tarball into `exports/` (override with `file`), excludes `.credentials.json` (see Security notes) |
-| `claude profile --import <file> [name]` | Create a profile from a tarball |
-| `claude profile --install-statusline` | Show the running profile (or `default`) in your statusline |
-| `claude profile --uninstall-statusline` | Remove it |
+| `claude-profile` | Active profile, why it was selected, and the full list |
+| `claude-profile <name>` | Set the active profile |
+| `claude-profile default` | Clear it; back to plain `~/.claude` |
+| `claude-profile <name> -- <args>` | One session in `<name>`; active unchanged |
+| `claude-profile --create <name>` | Snapshot the current setup |
+| `claude-profile --update <name>` | Mirror the current setup into `<name>` |
+| `claude-profile --reset [name]` | Wipe `<name>` (default: active) back to a first-run config; old contents moved to `.backups/`. Shared paths stay linked, so you stay logged in |
+| `claude-profile --delete <name>` | Delete (moved to `.backups/`) |
+| `claude-profile --rename <a> <b>` | Rename |
+| `claude-profile --copy <a> <b>` | Duplicate |
+| `claude-profile --show <name>` | Model, plugins, skills, hooks, MCP servers |
+| `claude-profile --diff <a> <b>` | The same, side by side |
+| `claude-profile --export <name> [file]` | Shareable tarball into `exports/` (override with `file`), excludes `.credentials.json` (see Security notes) |
+| `claude-profile --import <file> [name]` | Create a profile from a tarball |
+| `claude-profile --install-statusline` | Show the running profile (or `default`) in your statusline |
+| `claude-profile --uninstall-statusline` | Remove it |
 
 ## Which profile am I in?
 
@@ -244,10 +251,10 @@ Most specific wins:
 1. `CLAUDE_PROFILE=finance claude` — one invocation
 2. A `.claude-profile` file containing a profile name, found walking up from
    the current directory
-3. The active profile (`claude profile <name>`)
+3. The active profile (`claude-profile <name>`)
 4. `~/.claude`
 
-`claude profile` tells you which of these fired.
+`claude-profile` tells you which of these fired.
 
 ## Shared vs per-profile
 
@@ -307,7 +314,7 @@ There is no `--restore` command. Both commands move the profile's previous
 contents to `.backups/<name>-<timestamp>/` before writing, so recovery is a
 manual copy:
 
-`claude profile` prints a `store: <path>` line — that's the directory below.
+`claude-profile` prints a `store: <path>` line — that's the directory below.
 Substitute it for `<store>`:
 
 ```sh
@@ -334,7 +341,7 @@ up the block same as any other change.
 
 ## Uninstall
 
-Run `claude profile --uninstall-statusline` first if you installed that, then
+Run `claude-profile --uninstall-statusline` first if you installed that, then
 `./install.sh --uninstall` from the clone. It removes the rc source line, the
 `.zshenv` PATH block, the `claude-profile` symlink, and the install directory
 (`~/.claude-profile` by default), and prints where your profile store still

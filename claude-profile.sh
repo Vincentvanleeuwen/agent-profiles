@@ -166,13 +166,30 @@ claude() {
 # command that exists in some shells and not others is worse than either.
 #
 # Through eval because a hyphen is legal in a bash or zsh function name and a
-# parse error in dash and macOS sh: inside a string it is not parsed until the
-# eval runs, which is what keeps `dash -n` on this file working. Guarded on the
-# shell rather than attempted and recovered from, since a parse error is fatal
-# at parse time and there is nothing to catch.
-if [ -n "${BASH_VERSION:-}${ZSH_VERSION:-}" ]; then
+# parse error where it is not: inside a string it is not parsed until the eval
+# runs, which is what keeps `dash -n` on this file working.
+#
+# The guard has to be a capability test, and it cannot be "try it and ignore the
+# failure" — under dash and macOS sh that eval is fatal, exit 2, taking the rest
+# of the rc with it. Nor is BASH_VERSION enough on its own: macOS /bin/sh is bash
+# 3.2 in POSIX mode, where BASH_VERSION is set and hyphenated function names are
+# rejected anyway. SHELLOPTS is what separates those two, and bash always sets it.
+#
+# Nothing is lost in the shells that miss out. A sourced copy cannot locate itself
+# under plain sh at all (see the top of this file), so sourcing there is already
+# unsupported — this simply does not add a second way to notice.
+_cp_fn_hyphen=""
+[ -n "${ZSH_VERSION:-}" ] && _cp_fn_hyphen=1
+if [ -n "${BASH_VERSION:-}" ]; then
+    case ":${SHELLOPTS:-}:" in
+        *:posix:*) ;;
+        *) _cp_fn_hyphen=1 ;;
+    esac
+fi
+if [ -n "$_cp_fn_hyphen" ]; then
     eval 'claude-profile() { _cp_main "$@"; }'
 fi
+unset _cp_fn_hyphen
 
 # Executed rather than sourced: take the arguments straight to the dispatcher,
 # so a fresh clone works before anything has been added to a shell rc. The two

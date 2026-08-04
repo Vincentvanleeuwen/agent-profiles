@@ -31,6 +31,28 @@ function Check {
     }
 }
 
+# --- the two exported surfaces -----------------------------------------------
+#
+# Needs nothing from the scratch fixtures below, but has to come after Check is
+# defined: PowerShell resolves a command at the point of the call, and with
+# $ErrorActionPreference = 'Stop' a forward reference would abort the whole file.
+#
+# The Import-Module above is deliberately plain, with no -DisableNameChecking,
+# because that is what install.ps1 writes into $PROFILE. So this doubles as the
+# guard on why claude-profile is an alias: name it a function instead and
+# PowerShell reads the hyphen as Verb-Noun, finds "claude" among no approved
+# verbs, and prints a warning on every single session start.
+Check 'claude is exported as a function' 'Function' `
+    (Get-Command claude -ErrorAction SilentlyContinue).CommandType
+Check 'claude-profile is exported as an alias' 'Alias' `
+    (Get-Command claude-profile -ErrorAction SilentlyContinue).CommandType
+Check 'claude-profile resolves to the dispatcher' 'Invoke-CpProfile' `
+    (Get-Command claude-profile -ErrorAction SilentlyContinue).Definition
+# An exported alias whose target is not itself exported resolves only inside the
+# module's session state, which is not where anyone types.
+Check 'the alias target is exported too' 'Function' `
+    (Get-Command Invoke-CpProfile -ErrorAction SilentlyContinue).CommandType
+
 # --- scratch -----------------------------------------------------------------
 
 $root      = Join-Path ([IO.Path]::GetTempPath()) ("cp-test-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
