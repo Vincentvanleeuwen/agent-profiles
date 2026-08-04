@@ -1,10 +1,6 @@
 #!/bin/sh
-# Surface B: shells that never read an rc file have no `claude` function, so
-# `claude profile dev` would reach the real binary as two arguments. On PATH
-# ahead of it, this reproduces what the function does.
-#
-# ponytail: resolves siblings through $0, so symlinking this file elsewhere
-# breaks it. Deref $0 first if that ever needs to work.
+# Surface B: `claude profile ...` for shells that never read an rc file.
+# ponytail: resolves siblings via $0, so symlinking this file elsewhere breaks it.
 set -u
 
 _cp_entry="$(dirname "$0")/../claude-profile.sh"

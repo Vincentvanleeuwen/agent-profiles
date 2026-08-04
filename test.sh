@@ -1075,6 +1075,7 @@ echo "== Task 19: bin shims =="
 printf '#!/bin/sh\nprintf "CFG=%%s ARGS=%%s\\n" "$CLAUDE_CONFIG_DIR" "$*"\n' > "$TMP/fakerunner"
 chmod +x "$TMP/fakerunner"
 
+# shellcheck disable=SC2086 # $XENV holds space-separated KEY=VALUE pairs for env to split
 env $XENV "$CPX" --create shimprof >/dev/null
 printf 'shimprof\n' > "$TMP/xstore/active"
 
@@ -1087,13 +1088,16 @@ eq "bin/claude-profile points at the entry script" \
 check "symlinked entry still finds lib" \
    'env $XENV "$HERE/bin/claude-profile" | grep -q "^store: "'
 
+# shellcheck disable=SC2086 # $XENV holds space-separated KEY=VALUE pairs for env to split
 out=$(env $XENV _CP_RUNNER="$TMP/fakerunner" "$HERE/bin/claude" --version 2>&1)
 check "shim launches the active profile" \
    'echo "$out" | grep -q "CFG=$TMP/xstore/profiles/shimprof ARGS=--version"'
 
+# shellcheck disable=SC2086 # $XENV holds space-separated KEY=VALUE pairs for env to split
 out=$(env $XENV "$HERE/bin/claude" profile 2>&1)
 check "shim passes 'profile' through to the wrapper" 'echo "$out" | grep -q "^store: "'
 
+# shellcheck disable=SC2086 # $XENV holds space-separated KEY=VALUE pairs for env to split
 out=$(env $XENV _CP_RUNNER="$TMP/fakerunner" "$CPX" --run-active -p hi 2>&1)
 check "--run-active passes args through" \
    'echo "$out" | grep -q "CFG=$TMP/xstore/profiles/shimprof ARGS=-p hi"'
