@@ -7,8 +7,8 @@
 # Only two things are reimplemented here: working out which profile is selected,
 # and starting claude with CLAUDE_CONFIG_DIR pointed at it. Both are on the path
 # you take every time you type `claude`, and spawning bash to answer them would
-# be felt. Everything else -- create, update, delete, show, diff, export, import,
-# statusline -- is handed to claude-profile.sh under Git Bash, so the logic with
+# be felt. Everything else -- create, update, delete, show, diff, export,
+# import -- is handed to claude-profile.sh under Git Bash, so the logic with
 # actual risk in it (copying trees, moving backups, rewriting JSON) keeps exactly
 # one implementation.
 #

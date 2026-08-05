@@ -241,8 +241,6 @@ See [Uninstall](#uninstall) for removing either half.
 | `claude-profile --diff <a> <b>` | The same, side by side |
 | `claude-profile --export <name> [file]` | Shareable tarball into `exports/` (override with `file`), excludes `.credentials.json` (see Security notes) |
 | `claude-profile --import <file> [name]` | Create a profile from a tarball |
-| `claude-profile --install-statusline` | Show the running profile (or `default`) in your statusline |
-| `claude-profile --uninstall-statusline` | Remove it |
 
 ## Which profile am I in?
 
@@ -328,21 +326,31 @@ which is exactly why the status output names it rather than making you guess.
 
 ## Statusline
 
-The block appends ` · [<name>]` to your statusline, naming the config the
-session is actually running on: the profile name when one is active, and
-`[default]` when you are on the base `~/.claude`. It always prints — a blank
-statusline would be ambiguous between "on base" and "block not installed".
+Want the active profile in your statusline? Append this to your
+`statusline.sh` by hand:
 
-`--install-statusline` edits `~/.claude/statusline.sh` (base), not any
-existing profile. Profiles created *after* installing inherit the block
-through the normal copy; profiles that already existed at install time don't
-get it until you `--update` them — `--update` mirrors from base, so it picks
-up the block same as any other change.
+```sh
+if [ -z "$CLAUDE_CONFIG_DIR" ] || [ "$CLAUDE_CONFIG_DIR" = "$HOME/.claude" ]; then
+    printf ' · [default]'
+else
+    printf ' · [%s]' "${CLAUDE_CONFIG_DIR##*/}"
+fi
+```
+
+It names the config the session is actually running on: the profile name when
+one is active, `[default]` on base `~/.claude`. It always prints — a blank
+statusline would be ambiguous between "on base" and "not installed".
+
+Which `statusline.sh` matters: Claude Code reads `$CLAUDE_CONFIG_DIR`, so while
+a profile is active it runs *that profile's* copy, not the base one. Add the
+snippet to `<store>/profiles/<name>/statusline.sh` for the profiles you want it
+in, and to `~/.claude/statusline.sh` so future profiles inherit it. (This is
+why there's no `--install-statusline` command: a single write to base would
+silently miss every profile that already exists.)
 
 ## Uninstall
 
-Run `claude-profile --uninstall-statusline` first if you installed that, then
-`./install.sh --uninstall` from the clone. It removes the rc source line, the
+Run `./install.sh --uninstall` from the clone. It removes the rc source line, the
 `.zshenv` PATH block, the `claude-profile` symlink, and the install directory
 (`~/.claude-profile` by default), and prints where your profile store still
 lives — nothing under it is touched. Installed via npm? Use
@@ -352,8 +360,7 @@ kept inside the npm package after a git clone would be gone.
 There's no equivalent on the PowerShell side yet: remove the `Import-Module`
 line from `$PROFILE` and the `source` line from your shell rc by hand.
 
-`~/.claude` is untouched throughout — this tool never writes to it, except
-for the opt-in statusline block.
+`~/.claude` is untouched throughout — this tool never writes to it.
 
 ## Requirements
 

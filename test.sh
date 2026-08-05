@@ -53,7 +53,7 @@ JSON
 
 HOME="$FAKEHOME"
 export HOME
-# The suite asserts on the unset case (statusline "[default]"), so an inherited
+# The suite asserts on the no-profile-active case, so an inherited
 # CLAUDE_CONFIG_DIR — which is exactly what you have when you run the tests from
 # inside a profile — must not leak in.
 unset CLAUDE_CONFIG_DIR CLAUDE_PROFILE
@@ -434,95 +434,6 @@ eq "export refuses real credentials file" "$?" "1"
 check "no archive written" '[ ! -e "$TMP/leaky.tar.gz" ]'
 _CP_YES=1 _cp_main --delete leaky >/dev/null
 _CP_YES=1 _cp_main --delete imported >/dev/null
-
-echo "== Task 9: statusline =="
-
-# Uninstalling a block that was never installed must be a harmless no-op,
-# not a false "removed" message, and must not touch the file.
-_slorig=$(cat "$FAKEHOME/.claude/statusline.sh")
-_cp_main --uninstall-statusline >/dev/null 2>&1
-eq "uninstall on pristine file is a no-op" "$?" "0"
-eq "pristine file untouched" "$(cat "$FAKEHOME/.claude/statusline.sh")" "$_slorig"
-
-# A hand-truncated end marker leaves the range unbalanced. sed's
-# /start/,/end/d with no matching end deletes to EOF — must refuse instead.
-printf '\n# CLAUDE_PROFILE_BLOCK start\nunterminated block content\n' >> "$FAKEHOME/.claude/statusline.sh"
-_cp_main --uninstall-statusline >/dev/null 2>&1
-eq "uninstall refuses unbalanced markers" "$?" "1"
-check "unbalanced file left untouched" 'grep -q "unterminated block content" "$FAKEHOME/.claude/statusline.sh"'
-printf '%s\n' "$_slorig" > "$FAKEHOME/.claude/statusline.sh"
-
-_cp_main --install-statusline >/dev/null
-check "statusline backed up"  '[ -f "$FAKEHOME/.claude/statusline.sh.bak" ]'
-check "block installed"       'grep -q "CLAUDE_PROFILE_BLOCK start" "$FAKEHOME/.claude/statusline.sh"'
-check "original preserved"    'grep -q "printf hud" "$FAKEHOME/.claude/statusline.sh"'
-
-_cp_main --install-statusline >/dev/null
-eq "install is idempotent" \
-   "$(grep -c 'CLAUDE_PROFILE_BLOCK start' "$FAKEHOME/.claude/statusline.sh")" "1"
-
-out=$(CLAUDE_CONFIG_DIR="$TMP/store/profiles/dev" sh "$FAKEHOME/.claude/statusline.sh")
-check "statusline shows profile" 'printf "%s" "$out" | grep -q "\[dev\]"'
-
-out=$(sh "$FAKEHOME/.claude/statusline.sh")
-check "statusline shows default when unset" 'printf "%s" "$out" | grep -q "\[default\]"'
-
-# Launching through the shell function on the base config sets CLAUDE_CONFIG_DIR
-# to ~/.claude explicitly; that is still "default", not a profile named .claude.
-out=$(CLAUDE_CONFIG_DIR="$FAKEHOME/.claude" sh "$FAKEHOME/.claude/statusline.sh")
-check "statusline shows default for base dir" 'printf "%s" "$out" | grep -q "\[default\]"'
-
-_cp_main --uninstall-statusline >/dev/null
-check "block removed"      '! grep -q "CLAUDE_PROFILE_BLOCK" "$FAKEHOME/.claude/statusline.sh"'
-check "original still there" 'grep -q "printf hud" "$FAKEHOME/.claude/statusline.sh"'
-
-# A second install must never clobber the first backup — it holds the true
-# pre-block original, which is the most valuable thing to preserve.
-printf 'hand edited after uninstall\n' >> "$FAKEHOME/.claude/statusline.sh"
-_cp_main --install-statusline >/dev/null
-eq "first backup still holds the true original" \
-   "$(cat "$FAKEHOME/.claude/statusline.sh.bak")" "$_slorig"
-# Count via the glob rather than `ls | wc -l`: no subshell, no whitespace to
-# trim, and an unmatched glob is detectable instead of counting as one file.
-set -- "$FAKEHOME"/.claude/statusline.sh.bak.*
-[ -e "$1" ] || set --
-_bakcount=$#
-eq "timestamped sibling backup created" "$_bakcount" "1"
-check "timestamped sibling holds the edited state" \
-  'grep -q "hand edited after uninstall" "$FAKEHOME"/.claude/statusline.sh.bak.*'
-rm -f "$FAKEHOME"/.claude/statusline.sh.bak.*
-_cp_main --uninstall-statusline >/dev/null
-
-# Two backups landing in the same wall-clock second must not collide either —
-# the timestamped sibling name needs its own uniqueness check.
-date() { printf '%s\n' "20260101-000000"; }
-printf 'stub original\n' > "$FAKEHOME/.claude/statusline.sh"
-cp "$FAKEHOME/.claude/statusline.sh" "$FAKEHOME/.claude/statusline.sh.bak"
-printf 'edit one\n' > "$FAKEHOME/.claude/statusline.sh"
-_cp_backup_statusline "$FAKEHOME/.claude/statusline.sh" >/dev/null 2>&1
-printf 'edit two\n' > "$FAKEHOME/.claude/statusline.sh"
-_cp_backup_statusline "$FAKEHOME/.claude/statusline.sh" >/dev/null 2>&1
-unset -f date
-check "same-second sibling one exists" '[ -e "$FAKEHOME/.claude/statusline.sh.bak.20260101-000000" ]'
-check "same-second sibling two exists" '[ -e "$FAKEHOME/.claude/statusline.sh.bak.20260101-000000-1" ]'
-check "sibling one holds edit one" 'grep -q "edit one" "$FAKEHOME/.claude/statusline.sh.bak.20260101-000000"'
-check "sibling two holds edit two" 'grep -q "edit two" "$FAKEHOME/.claude/statusline.sh.bak.20260101-000000-1"'
-rm -f "$FAKEHOME"/.claude/statusline.sh.bak*
-printf '%s\n' "$_slorig" > "$FAKEHOME/.claude/statusline.sh"
-
-# A profile created before install must NOT carry the block — the contrast
-# that proves inherit-after-install isn't just always-present.
-_cp_main --create noblock >/dev/null
-check "profile created before install has no block" \
-  '! grep -q "CLAUDE_PROFILE_BLOCK" "$TMP/store/profiles/noblock/statusline.sh"'
-_CP_YES=1 _cp_main --delete noblock >/dev/null
-
-# A profile created after install inherits the block through the normal copy.
-_cp_main --install-statusline >/dev/null
-_cp_main --create sl >/dev/null
-check "new profile inherits block" 'grep -q "CLAUDE_PROFILE_BLOCK" "$TMP/store/profiles/sl/statusline.sh"'
-_CP_YES=1 _cp_main --delete sl >/dev/null
-_cp_main --uninstall-statusline >/dev/null
 
 echo "== Task 5c: backup collision =="
 

@@ -18,7 +18,6 @@
 #   commands.sh    read/set the active profile, launch claude
 #   manage.sh      backup, update, reset, delete, rename, copy
 #   inspect.sh     show, diff, export, import
-#   statusline.sh  the ~/.claude/statusline.sh block
 
 # Path of this file, and whether we were executed or sourced.
 #
@@ -71,7 +70,7 @@ _CP_LIB="$(_cp_libdir "$_CP_SELF")/lib"
 # the lib files only assign variables at the top level. Refusing to continue on
 # a missing file is the point: a partial load leaves a `claude` wrapper that
 # calls functions which do not exist.
-for _cp_f in resolve build profile commands manage inspect statusline migrate; do
+for _cp_f in resolve build profile commands manage inspect migrate; do
     if [ -r "$_CP_LIB/$_cp_f.sh" ]; then
         . "$_CP_LIB/$_cp_f.sh"
     else
@@ -105,9 +104,6 @@ claude-profile --diff <a> <b>        the same, for two profiles
 claude-profile --export <name> [f]   tarball to exports/ (no credentials)
 claude-profile --import <file> [n]   create a profile from a tarball
 
-claude-profile --install-statusline    show the running profile (or default) in your statusline
-claude-profile --uninstall-statusline  remove it
-
 claude-profile --migrate-store <dir>   move a store out of an old clone
 
 Resolution order: $CLAUDE_PROFILE, then .claude-profile walking up from the
@@ -129,8 +125,6 @@ _cp_main() {
         --diff)             shift; _cp_cmd_diff "$@" ;;
         --export)           shift; _cp_cmd_export "$@" ;;
         --import)           shift; _cp_cmd_import "$@" ;;
-        --install-statusline)   _cp_cmd_install_statusline ;;
-        --uninstall-statusline) _cp_cmd_uninstall_statusline ;;
         --migrate-store)     shift; _cp_migrate_store "$@" ;;
         # Internal, and deliberately absent from --help: it exists for bin/claude, not for people.
         --run-active)        shift; _cp_launch "$(_cp_resolve)" "$@" ;;
