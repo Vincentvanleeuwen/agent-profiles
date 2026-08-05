@@ -136,20 +136,14 @@ if [ -z "$want_shell" ]; then
     want_shell=$(shell_name "$parent")
 fi
 
-# Which file that shell reads at startup. The split matters: a login shell
-# reads .bash_profile and never .bashrc unless .bash_profile says so, and
-# macOS Terminal and Git Bash both start login shells where Linux terminals
-# start non-login ones.
+# Which file that shell reads at startup. The source line lives in .bashrc on
+# every platform; link_login_shell below bridges login shells (macOS Terminal,
+# Git Bash, `bash -l`) to it, so no per-OS split here — writing straight into
+# an existing .bash_profile would edit a file this script does not own.
 bash_rc() {
-    case "$(uname -s 2>/dev/null)" in
-        Darwin)
-            if [ -f "$HOME/.bash_profile" ]; then printf '%s' "$HOME/.bash_profile"
-            else printf '%s' "$HOME/.bashrc"; fi ;;
-        *)
-            if   [ -f "$HOME/.bashrc" ];       then printf '%s' "$HOME/.bashrc"
-            elif [ -f "$HOME/.bash_profile" ]; then printf '%s' "$HOME/.bash_profile"
-            else printf '%s' "$HOME/.bashrc"; fi ;;
-    esac
+    if   [ -f "$HOME/.bashrc" ];       then printf '%s' "$HOME/.bashrc"
+    elif [ -f "$HOME/.bash_profile" ]; then printf '%s' "$HOME/.bash_profile"
+    else printf '%s' "$HOME/.bashrc"; fi
 }
 
 # The file a login bash reads: the first of these that exists, with no

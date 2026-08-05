@@ -21,6 +21,10 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# profiles/ is gitignored, so a fresh checkout has none; seed it so the
+# Task-16 migration canary has a baseline to destroy.
+mkdir -p "$HERE/profiles"
+
 # Fake base config dir, shaped like a real ~/.claude
 FAKEHOME="$TMP/home"
 mkdir -p "$FAKEHOME/.claude/hooks" "$FAKEHOME/.claude/skills/demo" \
@@ -761,6 +765,7 @@ check "executed --create builds a profile" \
    'env $XENV "$CPX" --create xprof >/dev/null && [ -d "$TMP/xstore/profiles/xprof" ]'
 check "executed --create is visible to a later run" \
    'env $XENV "$CPX" | grep -q "xprof"'
+# shellcheck disable=SC2086 # $XENV holds space-separated KEY=VALUE pairs for env to split
 env $XENV "$CPX" --nope >/dev/null 2>&1
 eq "executed unknown option exits 1" "$?" "1"
 
