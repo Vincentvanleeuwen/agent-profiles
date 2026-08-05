@@ -208,13 +208,21 @@ function Invoke-CpBash {
     # A store set in Windows form has to cross over too, or bash builds paths out
     # of a string containing backslashes.
     $oldStore = $env:CLAUDE_PROFILES_DIR
+    $oldWin   = $env:CLAUDE_PROFILE_WINPATH
     try {
         if (Test-CpWindowsPath $oldStore) {
             $env:CLAUDE_PROFILES_DIR = ConvertTo-CpPosixPath $oldStore
         }
+        # Paths bash prints for a person to read (--path, --open, the path line
+        # in --show) come back as /c/Users/... otherwise, which is correct in the
+        # shell that produced it and unusable in the one that asked. Set here
+        # rather than inside the .sh because being run by this wrapper is the
+        # thing the sh side cannot work out for itself.
+        $env:CLAUDE_PROFILE_WINPATH = '1'
         & $bash (ConvertTo-CpPosixPath $script:CpScript) @converted
     } finally {
         Set-CpEnv 'CLAUDE_PROFILES_DIR' $oldStore
+        Set-CpEnv 'CLAUDE_PROFILE_WINPATH' $oldWin
     }
 }
 

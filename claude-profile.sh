@@ -98,13 +98,17 @@ claude-profile --delete <name>       delete a profile (backed up first)
 claude-profile --rename <a> <b>      rename a profile
 claude-profile --copy <a> <b>        duplicate a profile
 
-claude-profile --show <name>         model, plugins, skills, hooks, mcp servers
+claude-profile --show [name]         model, plugins, skills, hooks, mcp servers
 claude-profile --diff <a> <b>        the same, for two profiles
+claude-profile --path [name]         print where a profile's config lives
+claude-profile --open [name]         open that directory in your file manager
 
 claude-profile --export <name> [f]   tarball to exports/ (no credentials)
 claude-profile --import <file> [n]   create a profile from a tarball
 
 claude-profile --migrate-store <dir>   move a store out of an old clone
+
+Where [name] is optional it defaults to the profile you are in right now.
 
 Resolution order: $CLAUDE_PROFILE, then .claude-profile walking up from the
 current directory, then the active profile, then ~/.claude.
@@ -123,6 +127,8 @@ _cp_main() {
         --copy)             shift; _cp_cmd_copy "$@" ;;
         --show)             shift; _cp_cmd_show "$@" ;;
         --diff)             shift; _cp_cmd_diff "$@" ;;
+        --path)             shift; _cp_cmd_path "$@" ;;
+        --open)             shift; _cp_cmd_open "$@" ;;
         --export)           shift; _cp_cmd_export "$@" ;;
         --import)           shift; _cp_cmd_import "$@" ;;
         --migrate-store)     shift; _cp_migrate_store "$@" ;;

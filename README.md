@@ -237,8 +237,10 @@ See [Uninstall](#uninstall) for removing either half.
 | `claude-profile --delete <name>` | Delete (moved to `.backups/`) |
 | `claude-profile --rename <a> <b>` | Rename |
 | `claude-profile --copy <a> <b>` | Duplicate |
-| `claude-profile --show <name>` | Model, plugins, skills, hooks, MCP servers |
+| `claude-profile --show [name]` | Path, model, plugins, skills, hooks, MCP servers. No name: the profile you're in right now |
 | `claude-profile --diff <a> <b>` | The same, side by side |
+| `claude-profile --path [name]` | Print where that profile's config directory is, and nothing else |
+| `claude-profile --open [name]` | Open that directory in Explorer / Finder / your file manager |
 | `claude-profile --export <name> [file]` | Shareable tarball into `exports/` (override with `file`), excludes `.credentials.json` (see Security notes) |
 | `claude-profile --import <file> [name]` | Create a profile from a tarball |
 
@@ -252,7 +254,34 @@ Most specific wins:
 3. The active profile (`claude-profile <name>`)
 4. `~/.claude`
 
-`claude-profile` tells you which of these fired.
+`claude-profile` tells you which of these fired. `claude-profile --show` answers
+the same question and then describes what you'd actually be running with:
+
+```
+$ claude-profile --show
+dev  (active)
+  path     /home/you/.claude-profiles/profiles/dev
+  model    opus-5
+  plugins  superpowers@obra
+  skills   research, writing
+  hooks    3
+  mcp      figma, linear
+```
+
+## Where do profiles live?
+
+Under `<store>/profiles/<name>`, where the store is `~/.claude-profiles` unless
+`$CLAUDE_PROFILES_DIR` says otherwise. Two commands save you working that out:
+
+```sh
+claude-profile --path            # the directory you're using right now
+claude-profile --path finance    # a specific profile's
+claude-profile --open finance    # the same, in your file manager
+cd "$(claude-profile --path)"    # --path prints the path alone, for this
+```
+
+On Windows these print `C:\...` from PowerShell and `/c/...` from Git Bash —
+each shell gets the spelling it can actually use.
 
 ## Shared vs per-profile
 
@@ -366,9 +395,10 @@ line from `$PROFILE` and the `source` line from your shell rc by hand.
 
 POSIX sh (zsh or bash) and `tar`. Python is used by `--show`, `--diff`, and the
 `--export` env-block warning. Whichever of `python3`, `python` or `py -3` runs
-first is used; without any of them `--show`/`--diff` say which commands were
-looked for and exit 127, and `--export` skips the warning silently and still
-produces the archive — see Security notes.
+first is used; without any of them `--show`/`--diff` print the profile's path,
+then say which commands were looked for and exit 127, and `--export` skips the
+warning silently and still produces the archive — see Security notes. `--path`
+and `--open` need no Python at all.
 
 Each candidate is probed by running it, not by looking for it on `PATH`. On
 Windows `python3` is usually the Microsoft Store's App Execution Alias — a stub

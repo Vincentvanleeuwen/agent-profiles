@@ -1,11 +1,32 @@
-# Commands that report on or move profiles: show, diff, export, import.
+# Commands that report on or move profiles: show, path, open, diff, export, import.
 #
 # Sourced by ../claude-profile.sh. Not standalone: no shebang, no set -e,
 # and it assumes the other lib files are loaded (shell resolves function
 # references at call time, so load order does not matter).
 
+# A path for a person to read, on its own line.
+#
+# Git Bash's /c/Users/... is the right answer in the shell it came from and an
+# unusable one in PowerShell, which is where most Windows callers actually are.
+# The sh side cannot tell the two apart, so the PowerShell wrapper says which it
+# is (Invoke-CpBash sets this) and everything else keeps one implementation.
+_cp_showpath() {
+    if [ -n "${CLAUDE_PROFILE_WINPATH:-}" ] && command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$1" 2>/dev/null && return 0
+    fi
+    printf '%s\n' "$1"
+}
+
 _cp_summary() {
     _d="$1"
+    # Printed here rather than handed to python below, which looks like the
+    # obvious place for it. When python is a native Windows build, MSYS rewrites
+    # anything argument-shaped into a Windows path on the way in, so the line
+    # would come back converted on exactly the platform --path was not — and
+    # printing it before the summary means a machine with no python still gets
+    # told where the profile is.
+    printf '  path     '
+    _cp_showpath "$_d"
     # Unlike the sync helpers, --show and --diff are the summary: with no Python
     # there is nothing to fall back to, so say which command is missing rather
     # than letting the shell report a bare "python3: command not found".
@@ -51,11 +72,94 @@ print("  mcp      %s" % (", ".join(mcp) or "-"))
 PY
 }
 
+# The directory a session started here would use, for the commands that take an
+# optional name. Sets _CP_CUR_DIR and _CP_CUR_LABEL instead of printing one of
+# them: a $(...) call is a subshell, so a variable set inside would not survive,
+# and these two answers have to arrive together.
+#
+# Deliberately not _cp_resolve, which prints the directory and nothing else.
+# Reporting commands need the name and the reason it won as well.
+_cp_current() {
+    _cu_sel=$(_cp_selected)
+    # $(...) again: _CP_SRC set inside the call above stayed in that subshell.
+    # Re-run for the side effect, stdout already captured. Same as _cp_cmd_status.
+    _cp_selected >/dev/null
+    if [ -n "$_cu_sel" ] && _cp_exists "$_cu_sel"; then
+        _CP_CUR_DIR=$(_cp_dir "$_cu_sel")
+        _CP_CUR_LABEL="$_cu_sel  ($_CP_SRC)"
+        return 0
+    fi
+    # A name that selects nothing is what you most want to be told about, so it
+    # warns the way _cp_resolve does rather than quietly reading as "no profile".
+    if [ -n "$_cu_sel" ]; then
+        printf 'claude-profile: unknown profile "%s", using ~/.claude\n' "$_cu_sel" >&2
+    fi
+    _CP_CUR_DIR="$HOME/.claude"
+    _CP_CUR_LABEL="none (using ~/.claude)"
+}
+
 _cp_cmd_show() {
-    _n="$1"
+    _n="${1:-}"
+    if [ -z "$_n" ]; then
+        _cp_current
+        printf '%s\n' "$_CP_CUR_LABEL"
+        _cp_summary "$_CP_CUR_DIR"
+        return
+    fi
     _cp_need "$_n" || return 1
     printf '%s\n' "$_n"
     _cp_summary "$(_cp_dir "$_n")"
+}
+
+# Just the path, on stdout, nothing else — the form that survives $( ) and cd.
+_cp_cmd_path() {
+    _n="${1:-}"
+    if [ -z "$_n" ]; then
+        _cp_current
+        _cp_showpath "$_CP_CUR_DIR"
+        return 0
+    fi
+    _cp_need "$_n" || return 1
+    _cp_showpath "$(_cp_dir "$_n")"
+}
+
+_cp_cmd_open() {
+    _n="${1:-}"
+    if [ -z "$_n" ]; then
+        _cp_current
+        _op_d="$_CP_CUR_DIR"
+    else
+        _cp_need "$_n" || return 1
+        _op_d=$(_cp_dir "$_n")
+    fi
+    # Printed before opening, and printed even when nothing can open it: a path
+    # you can read is the useful half of this command, and the half that works
+    # over ssh or in a container.
+    _cp_showpath "$_op_d"
+    # Same seam as _CP_RUNNER on the launch path, and for the same reason: the
+    # test suite has to be able to run this without a file manager opening on
+    # whoever is watching.
+    if [ -n "${_CP_OPENER:-}" ]; then
+        "$_CP_OPENER" "$_op_d"
+        return $?
+    fi
+    case "$(uname -s 2>/dev/null)" in
+        Darwin)
+            open "$_op_d" ;;
+        MINGW*|MSYS*|CYGWIN*)
+            # Explorer wants a Windows path; under Git Bash $_op_d is /c/... and
+            # would be read as a relative path off the current drive. It also
+            # exits 1 on success, so its status is not worth passing on.
+            _op_w=$(cygpath -w "$_op_d" 2>/dev/null) || _op_w="$_op_d"
+            explorer.exe "$_op_w"
+            return 0 ;;
+        *)
+            command -v xdg-open >/dev/null 2>&1 || {
+                printf 'claude-profile: no xdg-open here; the path is above\n' >&2
+                return 1
+            }
+            xdg-open "$_op_d" ;;
+    esac
 }
 
 _cp_cmd_diff() {

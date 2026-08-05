@@ -394,6 +394,72 @@ check "diff shows plugin delta" 'printf "%s" "$out" | grep -q "alpha@m"'
 _cp_main --show ghost >/dev/null 2>&1
 eq "show refuses unknown profile" "$?" "1"
 
+check "show reports the profile directory" \
+      'printf "%s" "$(_cp_main --show dev)" | grep -q "path .*profiles/dev"'
+
+echo "== Task 7b: show, path and open with no name =="
+
+# The point of the no-name form: it answers "what am I actually running in",
+# which means it has to follow the same resolution order a session does, not
+# just read the active file. One case per source.
+_saved_active=$(cat "$TMP/store/active" 2>/dev/null)
+
+_cp_main dev >/dev/null
+out=$(_cp_main --show)
+check "show with no name reports the active profile" 'printf "%s" "$out" | grep -q "^dev  (active)"'
+check "show with no name summarises that profile"    'printf "%s" "$out" | grep -q "model .*opus-5"'
+eq "path with no name is the active profile" "$(_cp_main --path)" "$TMP/store/profiles/dev"
+eq "path with a name is that profile"        "$(_cp_main --path fin)" "$TMP/store/profiles/fin"
+
+out=$(CLAUDE_PROFILE=fin _cp_main --show)
+check "show with no name follows \$CLAUDE_PROFILE" 'printf "%s" "$out" | grep -q "^fin  (env)"'
+eq "path with no name follows \$CLAUDE_PROFILE" "$(CLAUDE_PROFILE=fin _cp_main --path)" \
+   "$TMP/store/profiles/fin"
+
+mkdir -p "$TMP/pinned"
+printf 'fin\n' > "$TMP/pinned/.claude-profile"
+out=$(cd "$TMP/pinned" && _cp_main --show)
+check "show with no name follows a pin" 'printf "%s" "$out" | grep -q "^fin  (pin:"'
+
+_cp_main default >/dev/null
+out=$(_cp_main --show)
+check "show with no profile reports the base config" 'printf "%s" "$out" | grep -q "none (using ~/.claude)"'
+check "show with no profile summarises ~/.claude"    'printf "%s" "$out" | grep -q "path .*home/.claude$"'
+eq "path with no profile is ~/.claude" "$(_cp_main --path)" "$FAKEHOME/.claude"
+
+# A selected-but-missing profile is the case worth being loud about: a session
+# would silently fall back to ~/.claude, so these two have to say so as well.
+out=$(CLAUDE_PROFILE=ghost _cp_main --show 2>&1)
+check "show warns when the selected profile is gone" 'printf "%s" "$out" | grep -q "unknown profile"'
+check "show falls back to ~/.claude"                 'printf "%s" "$out" | grep -q "none (using ~/.claude)"'
+
+_cp_main --path ghost >/dev/null 2>&1
+eq "path refuses an unknown name" "$?" "1"
+_cp_main --open ghost >/dev/null 2>&1
+eq "open refuses an unknown name" "$?" "1"
+
+# --open ends in a file manager, so it gets the _CP_RUNNER treatment: a stub
+# opener records what it was handed instead of a window appearing on whoever is
+# running the suite.
+cat > "$TMP/fake-opener" <<'SH'
+#!/bin/sh
+printf '%s\n' "$1" > "$FAKE_OPENED"
+SH
+chmod +x "$TMP/fake-opener"
+
+FAKE_OPENED="$TMP/opened" _CP_OPENER="$TMP/fake-opener" _cp_main --open dev >/dev/null
+eq "open hands the profile directory to the opener" "$(cat "$TMP/opened")" "$TMP/store/profiles/dev"
+
+out=$(FAKE_OPENED="$TMP/opened" _CP_OPENER="$TMP/fake-opener" _cp_main --open dev)
+eq "open prints the directory too" "$out" "$TMP/store/profiles/dev"
+
+_cp_main dev >/dev/null
+FAKE_OPENED="$TMP/opened" _CP_OPENER="$TMP/fake-opener" _cp_main --open >/dev/null
+eq "open with no name uses the current profile" "$(cat "$TMP/opened")" "$TMP/store/profiles/dev"
+_cp_main default >/dev/null
+
+[ -n "$_saved_active" ] && printf '%s\n' "$_saved_active" > "$TMP/store/active"
+
 echo "== Task 8: export and import =="
 
 _experr=$(_cp_main --export dev "$TMP/dev.tar.gz" 2>&1 >/dev/null)
@@ -471,6 +537,8 @@ check "no hardcoded home"  '! grep -q "/Users/" "$HERE/claude-profile.sh"'
 
 check "help lists create" '_cp_main --help | grep -q -- "--create"'
 check "help lists export" '_cp_main --help | grep -q -- "--export"'
+check "help lists path"   '_cp_main --help | grep -q -- "--path"'
+check "help lists open"   '_cp_main --help | grep -q -- "--open"'
 check "status names the store path" '_cp_main | grep -q "^store: "'
 check "README exists"     '[ -f "$HERE/README.md" ]'
 check "README warns about profiles being ignored" 'grep -q "gitignore" "$HERE/README.md"'
@@ -520,8 +588,9 @@ _cp_main --export "" "$TMP/leak-attempt.tar.gz" >/dev/null 2>&1
 eq "export with no name is rejected" "$?" "1"
 check "export with no name wrote no archive" '[ ! -e "$TMP/leak-attempt.tar.gz" ]'
 
-_cp_main --show >/dev/null 2>&1
-eq "show with no name is rejected" "$?" "1"
+# --show is deliberately absent from this list: with no name it reports the
+# profile you are in rather than refusing, which is read-only and cannot touch
+# the store. The empty-name hazard these tests guard is the write commands.
 
 _cp_main --diff >/dev/null 2>&1
 eq "diff with no name is rejected" "$?" "1"
