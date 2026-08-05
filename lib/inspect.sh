@@ -6,7 +6,15 @@
 
 _cp_summary() {
     _d="$1"
-    python3 - "$_d" <<'PY'
+    # Unlike the sync helpers, --show and --diff are the summary: with no Python
+    # there is nothing to fall back to, so say which command is missing rather
+    # than letting the shell report a bare "python3: command not found".
+    _sm_py=$(_cp_python) || {
+        printf 'claude-profile: need python3, python or py to summarise a profile\n' >&2
+        return 127
+    }
+    # shellcheck disable=SC2086 # deliberate: _cp_python may return "py -3"
+    $_sm_py - "$_d" <<'PY'
 import json, os, sys
 
 d = sys.argv[1]
@@ -88,7 +96,11 @@ _cp_cmd_export() {
     fi
     _tmplist=$(mktemp)
     _cp_owned "$_d" > "$_tmplist"
-    if [ -f "$_d/settings.json" ] && python3 -c 'import json,sys; sys.exit(0 if "env" in json.load(open(sys.argv[1])) else 1)' "$_d/settings.json" 2>/dev/null; then
+    # No Python means no warning, same as before: the guard is best effort and
+    # the archive is produced either way. See Security notes in the README.
+    _ex_py=$(_cp_python) || _ex_py=''
+    # shellcheck disable=SC2086 # deliberate: _cp_python may return "py -3"
+    if [ -n "$_ex_py" ] && [ -f "$_d/settings.json" ] && $_ex_py -c 'import json,sys; sys.exit(0 if "env" in json.load(open(sys.argv[1])) else 1)' "$_d/settings.json" 2>/dev/null; then
         printf 'claude-profile: warning: "%s" settings.json has an "env" block; the archive will contain it\n' "$_n" >&2
     fi
     printf 'claude-profile: archiving:\n' >&2

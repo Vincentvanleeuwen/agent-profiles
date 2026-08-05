@@ -84,13 +84,14 @@ _cp_build() {
 # empty directory on purpose. Seed just the identity keys back from base so the
 # keychain token is actually usable. Never overwrites a profile that already has
 # an account, and never touches anything else in the file.
-# ponytail: python3 only; if it is missing you get the old re-login, not a break.
+# ponytail: Python only; if it is missing you get the old re-login, not a break.
 _cp_seed_auth() {
     _sa_dest="$1/.claude.json"
     _sa_base="$HOME/.claude.json"
     [ -f "$_sa_base" ] || return 0
-    command -v python3 >/dev/null 2>&1 || return 0
-    python3 - "$_sa_dest" "$_sa_base" <<'EOF'
+    _sa_py=$(_cp_python) || return 0
+    # shellcheck disable=SC2086 # deliberate: _cp_python may return "py -3"
+    $_sa_py - "$_sa_dest" "$_sa_base" <<'EOF'
 import json, os, sys
 
 dest_path, base_path = sys.argv[1], sys.argv[2]
@@ -146,15 +147,16 @@ EOF
 # Called before a session to pick up what other profiles trusted, and after it
 # to publish what this one accepted. Only ever sets a flag, never clears one,
 # so untrusting a folder still has to be redone per profile.
-# ponytail: python3 only; without it you get the old re-prompting, not a break.
+# ponytail: Python only; without it you get the old re-prompting, not a break.
 # ponytail: no lock; a second session on the same profile can lose a flag,
 # which costs one re-prompt. Add flock if that ever actually bites.
 _cp_sync_prompts() {
     _sp_dir="$1"
     [ "$_sp_dir" = "$HOME/.claude" ] && return 0
     [ -f "$_sp_dir/.claude.json" ] || return 0
-    command -v python3 >/dev/null 2>&1 || return 0
-    python3 - "$_sp_dir/.claude.json" "$(_cp_store)/prompt-state.json" \
+    _sp_py=$(_cp_python) || return 0
+    # shellcheck disable=SC2086 # deliberate: _cp_python may return "py -3"
+    $_sp_py - "$_sp_dir/.claude.json" "$(_cp_store)/prompt-state.json" \
              "$HOME/.claude.json" <<'EOF'
 import json, os, sys
 

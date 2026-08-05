@@ -220,7 +220,7 @@ function Invoke-CpBash {
 
 # _cp_launch wraps every session in this so a trust dialog answered once is not
 # asked again in the next profile. A native launch has no _cp_launch, so call the
-# same code directly. Best effort by design: no Git Bash, or no python3 on the
+# same code directly. Best effort by design: no Git Bash, or no Python on the
 # other side, costs you a repeated prompt, not a failed launch.
 function Sync-CpPrompts {
     param([string]$Dir)
@@ -230,11 +230,12 @@ function Sync-CpPrompts {
     if ($Dir -eq (Get-CpBaseDir)) { return }
     $bash = Get-CpBash
     if (-not $bash) { return }
-    # Discarding stdout, which a successful sync does not produce anyway. The
-    # case this is really for: where python3 on PATH is the Microsoft Store's
-    # App Execution Alias rather than Python, it prints an advert and exits 0 --
-    # passing the `command -v python3` guard on the sh side and then printing
-    # that advert on every single launch. Errors still go to stderr and show.
+    # Discarding stdout, which a successful sync does not produce anyway.
+    # This used to be aimed at the Microsoft Store's App Execution Alias for
+    # python3 printing "Python was not found" on every launch, on the belief
+    # that the stub wrote to stdout. It writes to stderr and exits 49, so this
+    # never suppressed it; the sh side now probes for a Python that runs
+    # instead (_cp_python), which stops it at the source. Errors still show.
     & $bash (ConvertTo-CpPosixPath $script:CpScript) --sync-prompts (ConvertTo-CpPosixPath $Dir) | Out-Null
 }
 

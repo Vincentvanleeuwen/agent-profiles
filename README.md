@@ -294,10 +294,10 @@ structurally excludes `.credentials.json`, but `settings.json` is included,
 and anything you've put in its `env` block or baked into a hook command
 travels with the archive. The tool warns when it sees a top-level `env` key
 and prints the manifest of what's inside — read that manifest before you send
-the file to anyone. **The warning itself needs `python3`**: without it the
-check silently fails and no warning is printed, so on a machine without
-`python3` you must read the manifest yourself instead of trusting the absence
-of a warning.
+the file to anyone. **The warning itself needs Python**: without it the
+check silently fails and no warning is printed, so on a machine with no
+`python3`, `python` or `py` you must read the manifest yourself instead of
+trusting the absence of a warning.
 
 **Import's path-traversal safety relies on the `tar` binary refusing to
 extract `../` entries**, which is true of bsdtar and modern GNU tar. It has
@@ -357,11 +357,18 @@ for the opt-in statusline block.
 
 ## Requirements
 
-POSIX sh (zsh or bash) and `tar`. `python3` is used by `--show`, `--diff`, and
-the `--export` env-block warning. Without it, `--show`/`--diff` print the
-profile name and then a bare `command not found` (exit 127); `--export` just
-skips the warning silently and still produces the archive — see Security
-notes.
+POSIX sh (zsh or bash) and `tar`. Python is used by `--show`, `--diff`, and the
+`--export` env-block warning. Whichever of `python3`, `python` or `py -3` runs
+first is used; without any of them `--show`/`--diff` say which commands were
+looked for and exit 127, and `--export` skips the warning silently and still
+produces the archive — see Security notes.
+
+Each candidate is probed by running it, not by looking for it on `PATH`. On
+Windows `python3` is usually the Microsoft Store's App Execution Alias — a stub
+that is on `PATH` and passes a `command -v` check, then prints "Python was not
+found; run without arguments to install from the Microsoft Store" to stderr and
+exits 49 without running anything. Probing steps over it to the real `python`
+or `py` next to it.
 
 On Windows, additionally: Windows PowerShell 5.1 or later for `install.ps1`, and
 Git for Windows for the management subcommands.
