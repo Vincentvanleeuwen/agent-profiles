@@ -10,12 +10,33 @@ natively, so switching is just pointing it somewhere else.
 ## Install
 
 ```sh
+npm i -g claude-profiles
+```
+
+or, from a clone:
+
+```sh
 git clone <this repo> ~/claude-profiles
 ~/claude-profiles/install.sh
 ```
 
-On Windows, run `.\install.ps1` from PowerShell instead — or as well, if you use
-both PowerShell and Git Bash. See [Windows](#windows).
+Either way you end up with two things on PATH: `claude-profile`, a new command
+for managing profiles, and a `claude` wrapper that points the real binary at
+whichever profile is active. Both are copied into a stable `~/.claude-profile`
+(singular — a different directory from where your profiles themselves live,
+see [Where the data lives](#where-the-data-lives)), so nothing on PATH or in
+any rc file points into an npm/nvm prefix: changing your node version cannot
+break an existing install. npm is delivery only — its postinstall just runs
+the same `install.sh` under the hood. Set `CLAUDE_PROFILE_INSTALL_DIR` to put
+the code somewhere else; `install.sh` refuses to run, before touching
+anything, if that resolves to `/`, to `$HOME` itself, or to an ancestor of
+`$HOME` — it gets `rm -rf`'d on `--uninstall`, and any of those would make
+that catastrophic. It also refuses early, before anything is touched, if
+`$HOME` itself does not resolve to a real directory.
+
+On Windows, npm's postinstall cannot yet run the unmigrated `install.ps1` and
+prints a message telling you to clone the repo and run it yourself instead.
+See [Windows](#windows).
 
 `install.sh` adds the `source` line to your `~/.zshrc`, `~/.bashrc` or
 `~/.bash_profile` — whichever your shell actually reads, which differs between
@@ -43,27 +64,86 @@ rather than guessing:
 ./install.sh --rc ~/.profile   # or name the file outright
 ```
 
-An existing line pointing at a different clone also stops it. Nothing gets
-edited in either case.
+An existing line pointing at a different clone gets rewritten to point at the
+stable install instead — see [Moving off an old
+clone](#moving-off-an-old-clone) below for what else that involves.
 
 Start a new shell, then snapshot your current setup:
 
 ```sh
-claude profile --create development
-claude profile development
+claude-profile --create development
+claude-profile development
 ```
 
-`claude` now runs with that profile. `claude profile default` goes back to
+`claude` now runs with that profile. `claude-profile default` goes back to
 plain `~/.claude`.
+
+### The two commands
+
+`claude-profile` manages profiles — everything under
+[Commands](#commands) below. `claude` is Claude Code itself, with a wrapper in
+front that points `CLAUDE_CONFIG_DIR` at whichever profile is active. One to
+choose, one to work.
+
+Management has a single name and a single spelling. Launching is the half that
+has to work everywhere, and how far the wrapper reaches depends on where you are:
+
+| context | `claude-profile` | `claude` follows the active profile |
+|---|---|---|
+| interactive zsh or bash | yes, function and symlink on PATH | yes, shell function |
+| `zsh -c`, zsh scripts, Claude Code's own Bash tool | yes, symlink on PATH | yes, via the `.zshenv` shim |
+| `bash -c` | yes, symlink on PATH | no — would need `BASH_ENV`, out of scope |
+| `sh -c`, cron, GUI-launched apps | yes, symlink on PATH | no |
+
+`claude-profile` is reachable two ways on purpose: sourcing your rc defines it as
+a shell function, and `install.sh` also symlinks it into `~/.local/bin`. Either
+would do in most setups — both, because `~/.local/bin` is absent from the default
+PATH on macOS, and a login shell does not always read the file the source line
+went into. Where the `claude` wrapper does not reach, a session still gets the
+right config through `claude-profile <name> -- <args>`.
+
+Pass `--no-shim` to skip installing the standalone `claude` wrapper if you only
+want `claude-profile`; you still get the `claude` shell function in an interactive
+shell either way, since that comes from sourcing your rc, not from the shim.
+
+### Moving off an old clone
+
+Profiles used to live inside the clone itself, at
+`~/claude-profiles/profiles/`. They now default to `~/.claude-profiles`
+(plural, outside any clone — see [Where the data
+lives](#where-the-data-lives)), so moving to this version needs a one-time
+migration:
+
+```sh
+claude-profile --migrate-store ~/claude-profiles
+```
+
+This moves `profiles/`, `active`, `exports/`, `.backups/` and
+`prompt-state.json` out of the old clone and rewrites the absolute paths a
+profile bakes into its own `settings.json`, `settings.local.json`,
+`statusline.sh` and hooks so they still point at the right place;
+`.claude.json` and `teams/*/config.json` are left alone, since those hold
+project history for the clone directory, which still exists.
+`install.sh`, run from a clone that still has its own `profiles/` directory,
+does this automatically — pass `--no-migrate` to skip it.
+
+**A migration with nothing to rewrite still exits 1.** If none of your
+profiles have an absolute clone path baked into `settings.json` — true for
+anything only ever `--create`d and never customized — the files move
+correctly, but the command's own `store is now ...` success line never
+prints, and if `install.sh` triggered it automatically you'll see the
+worrying `the code is installed but the store was not migrated` message even
+though it was. Check `~/.claude-profiles/profiles/` (or your
+`CLAUDE_PROFILES_DIR`) before re-running anything by hand — the data has
+already moved.
 
 ### Without installing
 
-`claude profile ...` is not a Claude Code subcommand. It works because sourcing
-`claude-profile.sh` defines a shell function named `claude` that intercepts it.
-Skip that step and the arguments reach Claude Code itself, which replies
+`claude-profile` is a command this repo adds, not something Claude Code ships.
+Skip the install and there is nothing to run:
 
 ```
-error: unknown option '--create'
+claude-profile: command not found
 ```
 
 Running the script directly needs no install at all:
@@ -83,22 +163,36 @@ function already in your shell can change that. Start sessions with
 
 The wrapper is a POSIX shell function and exists only inside the shell that
 sourced it, so `install.sh` covers Git Bash and nothing else. PowerShell needs
-its own install, which defines the same `claude` command as a PowerShell
-function:
+its own install, which defines the same two commands natively — `claude` as a
+function, `claude-profile` as an alias:
 
 ```powershell
 .\install.ps1
 ```
 
-Both can be installed at once, and should be if you use both. They share one
-store, so a profile created in either is visible in both and `claude profile
-<name>` in one switches the other.
+Both can be installed at once, and should be if you use both. They are meant
+to share one store, so that a profile created in either is visible in both —
+but that is **not currently true**. Only the Git Bash / `install.sh` half
+defaults to `~/.claude-profiles`; `install.ps1`'s store still defaults to its
+own module directory. Left on defaults, the two halves read two different
+stores and `claude-profile` lists different profiles depending on which one
+you're in. Until the PowerShell half is migrated too, set
+`CLAUDE_PROFILES_DIR` explicitly, to the same path, for both — and install
+from a git clone with `install.ps1`; `npm i -g claude-profiles` on Windows
+does not run it (see [Install](#install)).
 
 `install.ps1` edits `$PROFILE`, checks that a fresh PowerShell really does end
-up with `claude` as a function, and warns if your execution policy is
+up with both commands defined, and warns if your execution policy is
 `Restricted` or `AllSigned` — under those, PowerShell never reads your profile
 and the wrapper is never defined. It will not change the policy for you; the fix
 is `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+`claude-profile` is an alias rather than a function because PowerShell reads any
+hyphenated name as `Verb-Noun` and warns on import when the verb is not one of its
+approved ones — which "claude" will never be. Aliases are not verb-checked, so
+this is the spelling that does not print a warning every time you open a shell.
+`Get-Command claude-profile` reports it as an `Alias` for `Invoke-CpProfile`;
+both names work.
 
 Only two things are reimplemented in PowerShell: working out which profile is
 selected, and starting `claude.exe` with `CLAUDE_CONFIG_DIR` set. Every
@@ -113,7 +207,7 @@ One syntax difference, forced by the PowerShell parser: it treats a bare `--` as
 end-of-parameters and eats it before the function is called, so
 
 ```powershell
-claude profile finance -- --version
+claude-profile finance -- --version
 ```
 
 arrives as `finance --version`, with the separator already gone. It works
@@ -127,29 +221,26 @@ executable with a function. **WSL is a separate installation** — its `$HOME` a
 filesystem are its own, so clone the repo inside WSL and run `install.sh` there
 if you want profiles in WSL too.
 
-Uninstalling is the mirror image: delete the `Import-Module` line from
-`$PROFILE`, and the `source` line from your shell rc.
+See [Uninstall](#uninstall) for removing either half.
 
 ## Commands
 
 | Command | Does |
 |---|---|
-| `claude profile` | Active profile, why it was selected, and the full list |
-| `claude profile <name>` | Set the active profile |
-| `claude profile default` | Clear it; back to plain `~/.claude` |
-| `claude profile <name> -- <args>` | One session in `<name>`; active unchanged |
-| `claude profile --create <name>` | Snapshot the current setup |
-| `claude profile --update <name>` | Mirror the current setup into `<name>` |
-| `claude profile --reset [name]` | Wipe `<name>` (default: active) back to a first-run config; old contents moved to `.backups/`. Shared paths stay linked, so you stay logged in |
-| `claude profile --delete <name>` | Delete (moved to `.backups/`) |
-| `claude profile --rename <a> <b>` | Rename |
-| `claude profile --copy <a> <b>` | Duplicate |
-| `claude profile --show <name>` | Model, plugins, skills, hooks, MCP servers |
-| `claude profile --diff <a> <b>` | The same, side by side |
-| `claude profile --export <name> [file]` | Shareable tarball into `exports/` (override with `file`), excludes `.credentials.json` (see Security notes) |
-| `claude profile --import <file> [name]` | Create a profile from a tarball |
-| `claude profile --install-statusline` | Show the running profile (or `default`) in your statusline |
-| `claude profile --uninstall-statusline` | Remove it |
+| `claude-profile` | Active profile, why it was selected, and the full list |
+| `claude-profile <name>` | Set the active profile |
+| `claude-profile default` | Clear it; back to plain `~/.claude` |
+| `claude-profile <name> -- <args>` | One session in `<name>`; active unchanged |
+| `claude-profile --create <name>` | Snapshot the current setup |
+| `claude-profile --update <name>` | Mirror the current setup into `<name>` |
+| `claude-profile --reset [name]` | Wipe `<name>` (default: active) back to a first-run config; old contents moved to `.backups/`. Shared paths stay linked, so you stay logged in |
+| `claude-profile --delete <name>` | Delete (moved to `.backups/`) |
+| `claude-profile --rename <a> <b>` | Rename |
+| `claude-profile --copy <a> <b>` | Duplicate |
+| `claude-profile --show <name>` | Model, plugins, skills, hooks, MCP servers |
+| `claude-profile --diff <a> <b>` | The same, side by side |
+| `claude-profile --export <name> [file]` | Shareable tarball into `exports/` (override with `file`), excludes `.credentials.json` (see Security notes) |
+| `claude-profile --import <file> [name]` | Create a profile from a tarball |
 
 ## Which profile am I in?
 
@@ -158,10 +249,10 @@ Most specific wins:
 1. `CLAUDE_PROFILE=finance claude` — one invocation
 2. A `.claude-profile` file containing a profile name, found walking up from
    the current directory
-3. The active profile (`claude profile <name>`)
+3. The active profile (`claude-profile <name>`)
 4. `~/.claude`
 
-`claude profile` tells you which of these fired.
+`claude-profile` tells you which of these fired.
 
 ## Shared vs per-profile
 
@@ -179,12 +270,16 @@ and the runtime directories.
 
 ## Where the data lives
 
-Profiles live in `profiles/` inside this clone, with the active profile name in
-`active` and pre-update snapshots in `.backups/`. **All three are in
-`.gitignore` and must stay there.** A profile's `settings.json` can hold
-environment variables and API keys — that's the whole reason they're
-gitignored, not an oversight, so don't "fix" it. Set `CLAUDE_PROFILES_DIR` to
-keep them elsewhere.
+Profiles live in `~/.claude-profiles` by default — outside any clone, so a
+clone can be deleted or moved without losing them. `profiles/` holds the
+profiles themselves, `active` the active profile name, `.backups/` the
+pre-update snapshots. Set `CLAUDE_PROFILES_DIR` to put the store somewhere
+else instead. If you point it at a git-tracked directory anyway — including
+this clone's own, pre-migration — `profiles/`, `active`, `.backups/`,
+`exports/` and `prompt-state.json` are all in this repo's `.gitignore`, so a
+profile's `settings.json` and any API keys in it were never at risk of being
+committed. Upgrading from a version that kept `profiles/` inside the clone?
+See [Moving off an old clone](#moving-off-an-old-clone).
 
 `.backups/` has no retention policy — nothing prunes it automatically. On a
 long-lived install it grows without bound; clear old entries by hand if that
@@ -197,10 +292,10 @@ structurally excludes `.credentials.json`, but `settings.json` is included,
 and anything you've put in its `env` block or baked into a hook command
 travels with the archive. The tool warns when it sees a top-level `env` key
 and prints the manifest of what's inside — read that manifest before you send
-the file to anyone. **The warning itself needs `python3`**: without it the
-check silently fails and no warning is printed, so on a machine without
-`python3` you must read the manifest yourself instead of trusting the absence
-of a warning.
+the file to anyone. **The warning itself needs Python**: without it the
+check silently fails and no warning is printed, so on a machine with no
+`python3`, `python` or `py` you must read the manifest yourself instead of
+trusting the absence of a warning.
 
 **Import's path-traversal safety relies on the `tar` binary refusing to
 extract `../` entries**, which is true of bsdtar and modern GNU tar. It has
@@ -217,7 +312,7 @@ There is no `--restore` command. Both commands move the profile's previous
 contents to `.backups/<name>-<timestamp>/` before writing, so recovery is a
 manual copy:
 
-`claude profile` prints a `store: <path>` line — that's the directory below.
+`claude-profile` prints a `store: <path>` line — that's the directory below.
 Substitute it for `<store>`:
 
 ```sh
@@ -226,37 +321,61 @@ rm -rf <store>/profiles/<name>                # or wherever it landed
 cp -R <store>/.backups/<name>-<timestamp> <store>/profiles/<name>
 ```
 
-`<store>` is `~/claude-profiles` by default, or `$CLAUDE_PROFILES_DIR` if you set it —
+`<store>` is `~/.claude-profiles` by default, or `$CLAUDE_PROFILES_DIR` if you set it —
 which is exactly why the status output names it rather than making you guess.
 
 ## Statusline
 
-The block appends ` · [<name>]` to your statusline, naming the config the
-session is actually running on: the profile name when one is active, and
-`[default]` when you are on the base `~/.claude`. It always prints — a blank
-statusline would be ambiguous between "on base" and "block not installed".
+Want the active profile in your statusline? Append this to your
+`statusline.sh` by hand:
 
-`--install-statusline` edits `~/.claude/statusline.sh` (base), not any
-existing profile. Profiles created *after* installing inherit the block
-through the normal copy; profiles that already existed at install time don't
-get it until you `--update` them — `--update` mirrors from base, so it picks
-up the block same as any other change.
+```sh
+if [ -z "$CLAUDE_CONFIG_DIR" ] || [ "$CLAUDE_CONFIG_DIR" = "$HOME/.claude" ]; then
+    printf ' · [default]'
+else
+    printf ' · [%s]' "${CLAUDE_CONFIG_DIR##*/}"
+fi
+```
+
+It names the config the session is actually running on: the profile name when
+one is active, `[default]` on base `~/.claude`. It always prints — a blank
+statusline would be ambiguous between "on base" and "not installed".
+
+Which `statusline.sh` matters: Claude Code reads `$CLAUDE_CONFIG_DIR`, so while
+a profile is active it runs *that profile's* copy, not the base one. Add the
+snippet to `<store>/profiles/<name>/statusline.sh` for the profiles you want it
+in, and to `~/.claude/statusline.sh` so future profiles inherit it. (This is
+why there's no `--install-statusline` command: a single write to base would
+silently miss every profile that already exists.)
 
 ## Uninstall
 
-Remove the `source` line from your shell rc and the `Import-Module` line from
-`$PROFILE` if you installed the PowerShell side, run
-`claude profile --uninstall-statusline` if you installed it, and delete the
-clone. `~/.claude` is untouched throughout — this tool never writes to it,
-except for the opt-in statusline block.
+Run `./install.sh --uninstall` from the clone. It removes the rc source line, the
+`.zshenv` PATH block, the `claude-profile` symlink, and the install directory
+(`~/.claude-profile` by default), and prints where your profile store still
+lives — nothing under it is touched. Installed via npm? Use
+`claude-profile-install --uninstall` instead — it runs the same `install.sh`,
+kept inside the npm package after a git clone would be gone.
+
+There's no equivalent on the PowerShell side yet: remove the `Import-Module`
+line from `$PROFILE` and the `source` line from your shell rc by hand.
+
+`~/.claude` is untouched throughout — this tool never writes to it.
 
 ## Requirements
 
-POSIX sh (zsh or bash) and `tar`. `python3` is used by `--show`, `--diff`, and
-the `--export` env-block warning. Without it, `--show`/`--diff` print the
-profile name and then a bare `command not found` (exit 127); `--export` just
-skips the warning silently and still produces the archive — see Security
-notes.
+POSIX sh (zsh or bash) and `tar`. Python is used by `--show`, `--diff`, and the
+`--export` env-block warning. Whichever of `python3`, `python` or `py -3` runs
+first is used; without any of them `--show`/`--diff` say which commands were
+looked for and exit 127, and `--export` skips the warning silently and still
+produces the archive — see Security notes.
+
+Each candidate is probed by running it, not by looking for it on `PATH`. On
+Windows `python3` is usually the Microsoft Store's App Execution Alias — a stub
+that is on `PATH` and passes a `command -v` check, then prints "Python was not
+found; run without arguments to install from the Microsoft Store" to stderr and
+exits 49 without running anything. Probing steps over it to the real `python`
+or `py` next to it.
 
 On Windows, additionally: Windows PowerShell 5.1 or later for `install.ps1`, and
 Git for Windows for the management subcommands.

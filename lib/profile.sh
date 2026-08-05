@@ -32,6 +32,39 @@ _cp_free() {
     return 0
 }
 
+# Which Python to run, printed as a command word list; fails if there is none.
+#
+# Callers used to run `python3` after a `command -v python3` guard. That guard
+# is not enough on Windows, where `python3` on PATH is usually the Microsoft
+# Store's App Execution Alias: a stub that exists, so `command -v` finds it,
+# and then prints "Python was not found; run without arguments to install from
+# the Microsoft Store" to stderr and exits 49 without running anything. A real
+# Python is normally installed alongside it as `python` or the `py` launcher,
+# so the answer is to probe rather than to give up.
+#
+# Probing means running each candidate and checking what came back, not just
+# checking its exit status: the stub's 49 is undocumented and costs nothing to
+# stop relying on. Cached because --show and --diff call this per profile and
+# PATH does not change underneath a running command.
+_cp_python() {
+    if [ -z "${_CP_PYTHON_PROBED:-}" ]; then
+        _CP_PYTHON_PROBED=1
+        _CP_PYTHON=''
+        # python3 first so a POSIX system stops at the first candidate. `py -3`
+        # is Windows-only, and is the one that is still a real Python in the
+        # case this whole function exists for.
+        for _cp_py in python3 python "py -3"; do
+            # shellcheck disable=SC2086 # deliberate: "py -3" must split
+            if [ "$($_cp_py -c 'print(1)' 2>/dev/null)" = 1 ]; then
+                _CP_PYTHON="$_cp_py"
+                break
+            fi
+        done
+    fi
+    [ -n "$_CP_PYTHON" ] || return 1
+    printf '%s' "$_CP_PYTHON"
+}
+
 # Destructive commands make you type the profile name back. _CP_YES skips it.
 _cp_confirm() {
     [ -n "${_CP_YES:-}" ] && return 0

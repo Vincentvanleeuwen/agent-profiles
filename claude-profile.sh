@@ -3,10 +3,11 @@
 # POSIX sh; runs under zsh and bash.
 #
 # Two ways in. Sourced from ~/.zshrc or ~/.bashrc — what install.sh sets up —
-# every subcommand works and a bare `claude` picks up the active profile.
-# Executed instead (./claude-profile.sh --create dev) nothing needs installing,
-# and everything works except that shadowing: only a function already in your
-# shell can make a plain `claude` follow the active profile.
+# you get a `claude-profile` function for every subcommand, and a bare `claude`
+# picks up the active profile. Executed instead (./claude-profile.sh --create dev)
+# nothing needs installing, and everything works except that shadowing: only a
+# function already in your shell can make a plain `claude` follow the active
+# profile.
 #
 # This file is the entry point only: it locates lib/, sources it, and holds the
 # argument dispatch. The implementation is in lib/:
@@ -17,7 +18,6 @@
 #   commands.sh    read/set the active profile, launch claude
 #   manage.sh      backup, update, reset, delete, rename, copy
 #   inspect.sh     show, diff, export, import
-#   statusline.sh  the ~/.claude/statusline.sh block
 
 # Path of this file, and whether we were executed or sourced.
 #
@@ -49,33 +49,28 @@ else
             _CP_EXEC=1 ;;
     esac
 fi
-_CP_HOME=$(cd "$(dirname "$_CP_SELF")" && pwd)
 
-# Directory holding this file with symlinks resolved, so lib/ is still findable
-# when claude-profile.sh is symlinked into a dotfiles repo or ~/bin.
-#
-# Deliberately not folded into _CP_HOME above: _CP_HOME is also the default
-# profile store, so resolving symlinks there would silently relocate the
-# profiles of anyone already installed that way. readlink -f would be shorter
-# but is not portable; this loop is.
-_cp_libdir() {
-    _ld_p="$1"
-    while [ -L "$_ld_p" ]; do
-        _ld_t=$(readlink "$_ld_p")
-        case "$_ld_t" in
-            /*) _ld_p="$_ld_t" ;;
-            *)  _ld_p="$(dirname "$_ld_p")/$_ld_t" ;;
+# readlink -f would be shorter but is not portable; this loop is.
+_cp_deref() {
+    _dr_p="$1"
+    while [ -L "$_dr_p" ]; do
+        _dr_t=$(readlink "$_dr_p")
+        case "$_dr_t" in
+            /*) _dr_p="$_dr_t" ;;
+            *)  _dr_p="$(dirname "$_dr_p")/$_dr_t" ;;
         esac
     done
-    (cd "$(dirname "$_ld_p")" && pwd)
+    printf '%s' "$_dr_p"
 }
+
+_cp_libdir() { (cd "$(dirname "$(_cp_deref "$1")")" && pwd); }
 _CP_LIB="$(_cp_libdir "$_CP_SELF")/lib"
 
 # Load order does not matter — sh resolves function references at call time, and
 # the lib files only assign variables at the top level. Refusing to continue on
 # a missing file is the point: a partial load leaves a `claude` wrapper that
 # calls functions which do not exist.
-for _cp_f in resolve build profile commands manage inspect statusline; do
+for _cp_f in resolve build profile commands manage inspect migrate; do
     if [ -r "$_CP_LIB/$_cp_f.sh" ]; then
         . "$_CP_LIB/$_cp_f.sh"
     else
@@ -91,26 +86,25 @@ unset _cp_f
 
 _cp_cmd_help() {
     cat <<'EOF'
-claude profile                       show active profile and list all
-claude profile <name>                set the active profile
-claude profile default               clear the active profile (back to ~/.claude)
-claude profile <name> -- <args>      run one session in <name>, active unchanged
+claude-profile                       show active profile and list all
+claude-profile <name>                set the active profile
+claude-profile default               clear the active profile (back to ~/.claude)
+claude-profile <name> -- <args>      run one session in <name>, active unchanged
 
-claude profile --create <name>       snapshot the current setup into a new profile
-claude profile --update <name>       mirror the current setup into an existing profile
-claude profile --reset [name]        wipe a profile back to a fresh config (default: active)
-claude profile --delete <name>       delete a profile (backed up first)
-claude profile --rename <a> <b>      rename a profile
-claude profile --copy <a> <b>        duplicate a profile
+claude-profile --create <name>       snapshot the current setup into a new profile
+claude-profile --update <name>       mirror the current setup into an existing profile
+claude-profile --reset [name]        wipe a profile back to a fresh config (default: active)
+claude-profile --delete <name>       delete a profile (backed up first)
+claude-profile --rename <a> <b>      rename a profile
+claude-profile --copy <a> <b>        duplicate a profile
 
-claude profile --show <name>         model, plugins, skills, hooks, mcp servers
-claude profile --diff <a> <b>        the same, for two profiles
+claude-profile --show <name>         model, plugins, skills, hooks, mcp servers
+claude-profile --diff <a> <b>        the same, for two profiles
 
-claude profile --export <name> [f]   tarball to exports/ (no credentials)
-claude profile --import <file> [n]   create a profile from a tarball
+claude-profile --export <name> [f]   tarball to exports/ (no credentials)
+claude-profile --import <file> [n]   create a profile from a tarball
 
-claude profile --install-statusline    show the running profile (or default) in your statusline
-claude profile --uninstall-statusline  remove it
+claude-profile --migrate-store <dir>   move a store out of an old clone
 
 Resolution order: $CLAUDE_PROFILE, then .claude-profile walking up from the
 current directory, then the active profile, then ~/.claude.
@@ -131,8 +125,9 @@ _cp_main() {
         --diff)             shift; _cp_cmd_diff "$@" ;;
         --export)           shift; _cp_cmd_export "$@" ;;
         --import)           shift; _cp_cmd_import "$@" ;;
-        --install-statusline)   _cp_cmd_install_statusline ;;
-        --uninstall-statusline) _cp_cmd_uninstall_statusline ;;
+        --migrate-store)     shift; _cp_migrate_store "$@" ;;
+        # Internal, and deliberately absent from --help: it exists for bin/claude, not for people.
+        --run-active)        shift; _cp_launch "$(_cp_resolve)" "$@" ;;
         # Internal, and deliberately absent from --help: it is a hook, not a
         # command. The PowerShell wrapper starts claude itself — a TUI cannot be
         # run through a non-interactive `bash -c` — so it has no _cp_launch to
@@ -152,19 +147,48 @@ _cp_main() {
     esac
 }
 
+# The whole reason the source line is worth having: a `claude` that follows the
+# active profile rather than always reading ~/.claude. Management lives in
+# claude-profile, not behind a subcommand of this.
 claude() {
-    if [ "${1:-}" = profile ]; then
-        shift
-        _cp_main "$@"
-        return $?
-    fi
     _cp_launch "$(_cp_resolve)" "$@"
 }
 
+# The management surface, as a function and not only as the symlink install.sh
+# puts on PATH. Sourcing is the thing install.sh guarantees; PATH is not —
+# ~/.local/bin is absent from the default PATH on macOS — and a management
+# command that exists in some shells and not others is worse than either.
+#
+# Through eval because a hyphen is legal in a bash or zsh function name and a
+# parse error where it is not: inside a string it is not parsed until the eval
+# runs, which is what keeps `dash -n` on this file working.
+#
+# The guard has to be a capability test, and it cannot be "try it and ignore the
+# failure" — under dash and macOS sh that eval is fatal, exit 2, taking the rest
+# of the rc with it. Nor is BASH_VERSION enough on its own: macOS /bin/sh is bash
+# 3.2 in POSIX mode, where BASH_VERSION is set and hyphenated function names are
+# rejected anyway. SHELLOPTS is what separates those two, and bash always sets it.
+#
+# Nothing is lost in the shells that miss out. A sourced copy cannot locate itself
+# under plain sh at all (see the top of this file), so sourcing there is already
+# unsupported — this simply does not add a second way to notice.
+_cp_fn_hyphen=""
+[ -n "${ZSH_VERSION:-}" ] && _cp_fn_hyphen=1
+if [ -n "${BASH_VERSION:-}" ]; then
+    case ":${SHELLOPTS:-}:" in
+        *:posix:*) ;;
+        *) _cp_fn_hyphen=1 ;;
+    esac
+fi
+if [ -n "$_cp_fn_hyphen" ]; then
+    eval 'claude-profile() { _cp_main "$@"; }'
+fi
+unset _cp_fn_hyphen
+
 # Executed rather than sourced: take the arguments straight to the dispatcher,
-# so a fresh clone works before anything has been added to a shell rc. The
-# `claude` function above is defined either way and simply goes unused here —
-# nothing outside this process can see it.
+# so a fresh clone works before anything has been added to a shell rc. The two
+# functions above are defined either way and simply go unused here — nothing
+# outside this process can see them.
 if [ -n "${_CP_EXEC:-}" ]; then
     _cp_main "$@"
     exit $?

@@ -3,21 +3,43 @@
 # worked. Safe to re-run: an install that is already correct is a no-op.
 #
 # The failure this exists to prevent: without that line there is no `claude`
-# shell function, so `claude profile --create dev` reaches the real Claude Code
-# binary, which knows nothing about --create and answers with a bare
-# "error: unknown option '--create'" — which says nothing about the actual
-# problem, that the tool was never installed.
+# shell function, so every session reads ~/.claude and quietly ignores whichever
+# profile you selected — a wrong answer that looks like a working install, and
+# the one failure mode here that never announces itself.
 #
 # Usage: ./install.sh [--rc <path>] [--shell bash|zsh]
 
 set -u
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
-TARGET="$SELF_DIR/claude-profile.sh"
+INSTALL_DIR=${CLAUDE_PROFILE_INSTALL_DIR:-$HOME/.claude-profile}
+BIN_DIR="$INSTALL_DIR/bin"
+LINK_DIR=${CP_LINK_DIR:-$HOME/.local/bin}
+ZSHENV=${CP_ZSHENV:-$HOME/.zshenv}
+TARGET="$INSTALL_DIR/claude-profile.sh"
 LINE=". \"$TARGET\""
+ZSHENV_MARK="# claude-profile PATH — added by install.sh"
 
 say() { printf '%s\n' "$1"; }
 die() { printf 'install: %s\n' "$1" >&2; exit 1; }
+
+# INSTALL_DIR feeds rm -rf in copy_code; refuse before it runs if it canonicalises
+# to $HOME, an ancestor of $HOME, or /. String checks alone miss ///, $HOME/.,
+# relative paths and symlinks, so resolve with pwd -P and compare once.
+if [ -d "$INSTALL_DIR" ]; then
+    _id=$(cd "$INSTALL_DIR" 2>/dev/null && pwd -P) || die "cannot resolve $INSTALL_DIR"
+else
+    _idp=$(cd "$(dirname "$INSTALL_DIR")" 2>/dev/null && pwd -P) \
+        || die "cannot resolve the parent of $INSTALL_DIR"
+    _id="${_idp%/}/$(basename "$INSTALL_DIR")"
+fi
+_home=$(cd "$HOME" 2>/dev/null && pwd -P) || die "cannot resolve \$HOME"
+case "$_id" in /) die "CLAUDE_PROFILE_INSTALL_DIR resolves to /" ;; esac
+[ "$_id" = "$_home" ] && die "CLAUDE_PROFILE_INSTALL_DIR is \$HOME ($HOME)"
+case "$_home" in
+    "$_id"/*) die "CLAUDE_PROFILE_INSTALL_DIR ($INSTALL_DIR) is an ancestor of \$HOME" ;;
+esac
+unset _id _idp _home
 
 usage() {
     cat <<EOF
@@ -25,10 +47,15 @@ Usage: ./install.sh [options]
 
   --rc <path>        rc file to edit, skipping detection
   --shell bash|zsh   which shell's rc to edit, skipping detection
+  --no-shim          skip installing the claude shim (bin/claude)
+  --no-migrate       skip migrating a store found inside this clone
+  --from-npm         skip the fresh-shell check; npm has no terminal to check
+  --uninstall        reverse the install; your profile store is left alone
   -h, --help         this
 
-With no options it works out which rc file your shell reads, adds the source
-line, and checks that a fresh shell picks it up.
+With no options it copies the code to $INSTALL_DIR, links claude-profile onto
+PATH, adds the source line to your shell rc, and checks that a fresh shell
+picks it up.
 EOF
 }
 
@@ -43,17 +70,26 @@ manual() {
 
 rc=""
 want_shell=""
+no_shim=""
+no_migrate=""
+from_npm=""
+uninstall=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --rc)      [ $# -ge 2 ] || die "--rc needs a path";      rc="$2";         shift 2 ;;
-        --shell)   [ $# -ge 2 ] || die "--shell needs a name";   want_shell="$2"; shift 2 ;;
-        -h|--help) usage; exit 0 ;;
-        *)         die "unknown argument $1 (try --help)" ;;
+        --rc)         [ $# -ge 2 ] || die "--rc needs a path";      rc="$2";         shift 2 ;;
+        --shell)      [ $# -ge 2 ] || die "--shell needs a name";   want_shell="$2"; shift 2 ;;
+        --no-shim)    no_shim=1;    shift ;;
+        --no-migrate) no_migrate=1; shift ;;
+        --from-npm)   from_npm=1;   shift ;;
+        --uninstall)  uninstall=1;  shift ;;
+        -h|--help)    usage; exit 0 ;;
+        *)            die "unknown argument $1 (try --help)" ;;
     esac
 done
 
-[ -f "$TARGET" ]       || die "cannot find $TARGET"
+[ -f "$SELF_DIR/claude-profile.sh" ] || die "cannot find $SELF_DIR/claude-profile.sh"
 [ -d "$SELF_DIR/lib" ] || die "cannot find $SELF_DIR/lib — is the clone complete?"
+[ -d "$SELF_DIR/bin" ] || die "cannot find $SELF_DIR/bin — is the clone complete?"
 
 # CP_RC stays supported: it is how the test suite keeps this off a real rc.
 [ -n "$rc" ] || rc=${CP_RC:-}
@@ -193,26 +229,156 @@ if [ ! -f "$rc" ]; then
     say "created $rc"
 fi
 
-# Already mentioned? Then either it is our line and there is nothing to do, or
-# it points somewhere else and this is not a decision to make on someone's
-# behalf — a second clone, a moved directory, a hand-written variant.
+# Drop lines matching an extended-regex pattern, leaving the rest of the file
+# byte-for-byte. No sed -i: it is not POSIX.
+drop_lines() {
+    _f="$1"
+    _pat="$2"
+    [ -f "$_f" ] || return 0
+    _t="$_f.cp-tmp.$$"
+    grep -vE "$_pat" "$_f" > "$_t"
+    _gs=$?
+    # grep exits 1 when the pattern matched every line, leaving the file
+    # empty — that's normal here, not a failure. Anything past 1 is a real error.
+    [ "$_gs" -le 1 ] || { rm -f "$_t"; die "could not rewrite $_f"; }
+    mv "$_t" "$_f" || { rm -f "$_t"; die "could not rewrite $_f"; }
+}
+
+# Drops the PATH block add_zshenv_path wrote: the marker plus the two lines
+# after it. Anchored on the marker, not on BIN_DIR, so a CLAUDE_PROFILE_INSTALL_DIR
+# without "claude-profile" in its name still gets fully reversed.
+drop_zshenv_block() {
+    _f="$1"
+    [ -f "$_f" ] || return 0
+    _t="$_f.cp-tmp.$$"
+    # add_zshenv_path always writes a blank separator line right before the
+    # marker, so drop that too — hold each line back by one print so we know
+    # whether it turned out to be that separator before deciding to print it.
+    awk -v mark="$ZSHENV_MARK" '
+        skip > 0    { skip--; next }
+        $0 == mark  { skip = 2; have = 0; next }
+        have        { print buf }
+        { buf = $0; have = 1 }
+        END { if (have) print buf }
+    ' "$_f" > "$_t" || { rm -f "$_t"; die "could not rewrite $_f"; }
+    mv "$_t" "$_f" || { rm -f "$_t"; die "could not rewrite $_f"; }
+}
+
+# rm -rf "$INSTALL_DIR" needs no extra guard: the canonicalising check at the
+# top of this file already refused /, $HOME and its ancestors before any flag ran.
+if [ -n "$uninstall" ]; then
+    drop_lines "$rc" '^[[:space:]]*(\.|source)[[:space:]].*claude-profile\.sh'
+    drop_lines "$rc" '^# claude-profile — added by install.sh$'
+    drop_zshenv_block "$ZSHENV"
+    # Only remove the symlink if it is actually ours: a foreign file or link
+    # at the same path is the user's, not something uninstall gets to touch.
+    case "$(readlink "$LINK_DIR/claude-profile" 2>/dev/null)" in
+        "$BIN_DIR"/*) rm -f "$LINK_DIR/claude-profile" ;;
+        *) [ -e "$LINK_DIR/claude-profile" ] && say "left $LINK_DIR/claude-profile alone: not ours" ;;
+    esac
+    rm -rf "$INSTALL_DIR"
+    say "removed $INSTALL_DIR, the PATH line and the rc line"
+    say ""
+    say "Your profiles were not touched:"
+    say ""
+    say "    ${CLAUDE_PROFILES_DIR:-$HOME/.claude-profiles}"
+    exit 0
+fi
+
+copy_code() {
+    [ "$SELF_DIR" = "$INSTALL_DIR" ] && return 0
+    mkdir -p "$INSTALL_DIR" || die "could not create $INSTALL_DIR; nothing was installed"
+    for _item in claude-profile.sh lib bin claude-profile.psm1; do
+        [ -e "$SELF_DIR/$_item" ] || continue
+        rm -rf "${INSTALL_DIR:?}/$_item"
+        # -R, not -r: -R is the POSIX spelling and it copies symlinks as
+        # symlinks, which is what bin/claude-profile is.
+        cp -R "$SELF_DIR/$_item" "$INSTALL_DIR/$_item" \
+            || die "could not copy $_item into $INSTALL_DIR; $INSTALL_DIR exists but the copy is incomplete"
+    done
+    # npm strips symlinks from published tarballs, so a package install can
+    # arrive without this one; a git clone already has it via the cp -R above.
+    # Stays a symlink, not a wrapper: link_bin points ~/.local/bin/claude-profile here,
+    # so a dirname "$0" wrapper would resolve its sibling against the wrong directory.
+    [ -e "$BIN_DIR/claude-profile" ] || ln -s ../claude-profile.sh "$BIN_DIR/claude-profile"
+    [ -n "$no_shim" ] && rm -f "$BIN_DIR/claude"
+    say "installed the code to $INSTALL_DIR"
+}
+
+# A pre-stable-install clone can carry its own store at $SELF_DIR/profiles.
+# --no-migrate exists so a live session's own $SELF_DIR/profiles is never moved by accident.
+migrate_clone_store() {
+    [ -n "$no_migrate" ] && return 0
+    [ "$SELF_DIR" = "$INSTALL_DIR" ] && return 0
+    [ -d "$SELF_DIR/profiles" ] || return 0
+    say "found a store in $SELF_DIR, moving it out of the clone"
+    "$TARGET" --migrate-store "$SELF_DIR" \
+        || die "the code is installed but the store was not migrated. Run
+     '\"$TARGET\" --migrate-store \"$SELF_DIR\"' by hand to see the error."
+}
+
+link_bin() {
+    mkdir -p "$LINK_DIR" || die "the code is installed to $INSTALL_DIR, but could not create $LINK_DIR"
+    ln -sf "$BIN_DIR/claude-profile" "$LINK_DIR/claude-profile" \
+        || die "the code is installed to $INSTALL_DIR, but could not link $LINK_DIR/claude-profile"
+    say "linked $LINK_DIR/claude-profile"
+}
+
+# .zshenv, not .zshrc: it is the only startup file a non-interactive zsh
+# reads, which is the whole reason the claude shim needs it on PATH here.
+add_zshenv_path() {
+    [ -n "$no_shim" ] && return 0
+    [ "$want_shell" = zsh ] || return 0
+    if [ -f "$ZSHENV" ] && grep -qF "$BIN_DIR" "$ZSHENV"; then
+        say "PATH line already in $ZSHENV"
+        return 0
+    fi
+    {
+        printf '\n%s\n' "$ZSHENV_MARK"
+        printf 'case ":$PATH:" in *":%s:"*) ;; *) PATH="%s:$PATH" ;; esac\n' \
+               "$BIN_DIR" "$BIN_DIR"
+        printf 'export PATH\n'
+    } >> "$ZSHENV" || die "the code is installed and linked onto PATH, but could not append to $ZSHENV"
+    say "added the PATH line to $ZSHENV"
+}
+
+copy_code
+migrate_clone_store
+link_bin
+add_zshenv_path
+
+# Already mentioned: either it's our line already, or it points at a clone
+# and needs repointing at the tree copy_code just installed — never refuse.
 existing=$(grep -n 'claude-profile\.sh' "$rc" 2>/dev/null || true)
 if [ -n "$existing" ]; then
     if grep -qxF "$LINE" "$rc"; then
         say "already installed in $rc"
     else
-        printf 'install: %s already refers to claude-profile.sh, but not the\n' "$rc" >&2
-        printf 'way this script would write it:\n\n' >&2
-        printf '%s\n' "$existing" | sed 's/^/    /' >&2
-        printf '\nExpected:\n\n    %s\n\n' "$LINE" >&2
-        printf 'Remove or fix that line, then run this again. Nothing was changed.\n' >&2
-        exit 1
+        # Collapse any duplicates to one line while we are here.
+        _t="$rc.cp-tmp.$$"
+        awk -v line="$LINE" '
+            /claude-profile\.sh/ && /^[[:space:]]*(\.|source)[[:space:]]/ {
+                if (!done) { print line; done = 1 }
+                next
+            }
+            { print }
+        ' "$rc" > "$_t" || { rm -f "$_t"; die "the code is installed and both PATH surfaces are set up, but could not rewrite $rc"; }
+        if ! grep -qxF "$LINE" "$_t"; then
+            rm -f "$_t"
+            die "the code is installed and both PATH surfaces are set up, but $rc
+     mentions claude-profile.sh in a form this script does not recognise as a
+     source line. Fix it by hand, then run this again:
+
+$(printf '%s\n' "$existing" | sed 's/^/         /')"
+        fi
+        mv "$_t" "$rc" || { rm -f "$_t"; die "the code is installed and both PATH surfaces are set up, but could not rewrite $rc"; }
+        say "pointed the source line in $rc at $TARGET"
     fi
 else
     {
         printf '\n# claude-profile — added by install.sh\n'
         printf '%s\n' "$LINE"
-    } >> "$rc" || die "could not append to $rc"
+    } >> "$rc" || die "the code is installed and both PATH surfaces are set up, but could not append to $rc"
     say "added the source line to $rc"
 fi
 
@@ -224,12 +390,17 @@ if [ -z "$rc_explicit" ] && [ "$rc" = "$HOME/.bashrc" ]; then
 fi
 
 # Prove it. A line in a file is not an install; the test is whether the shell
-# you type into ends up with `claude` as a function.
+# you type into ends up with `claude` as a function and a `claude-profile` it can
+# reach. Both, because either alone is a half-install that only shows itself when
+# you reach for the other half.
 #
 # The shell that does the checking has to be the one whose rc was edited —
 # falling back to another would read a different startup file and pass no
 # matter what was written. Only the explicit-rc case can be checked with any
 # shell, because there it is a plain source of a named file.
+if [ -n "$from_npm" ]; then
+    say "skipping the fresh-shell check: npm runs this without a terminal"
+else
 verify_bin=""
 if [ -n "$rc_explicit" ]; then
     for cand in "$want_shell" bash zsh; do
@@ -248,16 +419,17 @@ if [ -z "$verify_bin" ]; then
 elif [ -n "$rc_explicit" ]; then
     # An --rc can point anywhere, and no interactive shell would read an
     # arbitrary path, so the honest claim is narrower: sourcing that file
-    # defines the wrapper. Whether anything reads it is the caller's business.
+    # defines both commands. Whether anything reads it is the caller's business.
     if "$verify_bin" -c '. "$1" || exit 1
 case $(command -v claude) in
-    claude) exit 0 ;;
+    claude) ;;
     *) exit 1 ;;
-esac' _ "$rc" >/dev/null 2>&1; then
-        say "verified: sourcing $rc defines the claude wrapper"
+esac
+[ -n "$(command -v claude-profile)" ] || exit 1' _ "$rc" >/dev/null 2>&1; then
+        say "verified: sourcing $rc defines claude and claude-profile"
         say "note: --rc given, so whether a shell reads that file was not checked"
     else
-        die "wrote $rc, but sourcing it does not define the claude wrapper.
+        die "wrote $rc, but sourcing it does not define claude and claude-profile.
      Run '. \"$TARGET\"' by hand to see the error."
     fi
 else
@@ -284,6 +456,27 @@ else
      claude wrapper. Run '. \"$TARGET\"' by hand to see the error." ;;
     esac
 
+    # The other half. claude-profile has two ways to exist — the function the
+    # source line defines, and the symlink link_bin put in $LINK_DIR — and either
+    # one is a working install, so this insists on one of them rather than on
+    # which. It does insist, though: ~/.local/bin is absent from the default PATH
+    # on macOS, so the symlink on its own is not something to take on trust.
+    seen_cp=$("$verify_bin" -i -c 'command -v claude-profile' 2>/dev/null)
+    case "$seen_cp" in
+        "")
+            die "wrote $rc, but a new interactive $want_shell has no claude-profile
+     command — neither the function nor $LINK_DIR/claude-profile on PATH.
+     Run '. \"$TARGET\"' by hand to see the error." ;;
+        alias*)
+            die "an alias in $rc shadows claude-profile:
+
+         $seen_cp
+
+     Alias expansion happens before function lookup, so the alias always
+     wins. Remove it, then run this again." ;;
+        *) say "verified: claude-profile resolves to $seen_cp" ;;
+    esac
+
     # Login shells read a different file, and that difference is the whole bug
     # this check exists for: a source line in .bashrc that `bash -l` never
     # reaches, on an install that otherwise looks perfect.
@@ -296,6 +489,14 @@ else
         printf 'silently use ~/.claude instead of the active profile.\n' >&2
     fi
 fi
+fi
+
+if [ -n "$from_npm" ]; then
+    say ""
+    say "If you are moving off a git clone, move its store too:"
+    say ""
+    say "    claude-profile --migrate-store <path-to-old-clone>"
+fi
 
 say ""
 say "Start a new shell, or run this in the current one:"
@@ -304,8 +505,8 @@ say "    $LINE"
 say ""
 say "Then:"
 say ""
-say "    claude profile --create development"
-say "    claude profile development"
+say "    claude-profile --create development"
+say "    claude-profile development"
 
 # Git Bash only shadows `claude` inside Git Bash. PowerShell and cmd run
 # claude.exe directly and never see a POSIX shell function, so silently getting
@@ -320,7 +521,7 @@ case "$(uname -s 2>/dev/null)" in
         say "    powershell -File \"$SELF_DIR/install.ps1\""
         say ""
         say "Both share one store. cmd.exe cannot be supported at all — from there,"
-        say "use 'claude profile <name> -- <args>' from this shell instead."
+        say "use 'claude-profile <name> -- <args>' from this shell instead."
         ;;
 esac
 

@@ -8,8 +8,12 @@ _cp_store() {
     if [ -n "${CLAUDE_PROFILES_DIR:-}" ]; then
         printf '%s' "$CLAUDE_PROFILES_DIR"
     else
-        printf '%s' "$_CP_HOME"
+        printf '%s' "$HOME/.claude-profiles"
     fi
+}
+
+_cp_install_dir() {
+    printf '%s' "${CLAUDE_PROFILE_INSTALL_DIR:-$HOME/.claude-profile}"
 }
 
 _cp_read_name() {

@@ -7,8 +7,8 @@
 # Only two things are reimplemented here: working out which profile is selected,
 # and starting claude with CLAUDE_CONFIG_DIR pointed at it. Both are on the path
 # you take every time you type `claude`, and spawning bash to answer them would
-# be felt. Everything else -- create, update, delete, show, diff, export, import,
-# statusline -- is handed to claude-profile.sh under Git Bash, so the logic with
+# be felt. Everything else -- create, update, delete, show, diff, export,
+# import -- is handed to claude-profile.sh under Git Bash, so the logic with
 # actual risk in it (copying trees, moving backups, rewriting JSON) keeps exactly
 # one implementation.
 #
@@ -62,9 +62,8 @@ function Get-CpBaseDir {
 # E:\Codeshit\x -> /e/Codeshit/x
 #
 # Done here rather than left to MSYS's own argument heuristics, which apply to
-# some positions and not others. Note the consequence: bash resolves _CP_HOME to
-# /e/Codeshit/claude-profiles while PowerShell calls the same directory
-# E:\Codeshit\claude-profiles. One store, two spellings, no divergence.
+# some positions and not others. Bash and PowerShell see the same store path
+# with different path syntax, and this conversion keeps them in sync.
 function ConvertTo-CpPosixPath {
     param([string]$Path)
     if ([string]::IsNullOrEmpty($Path)) { return $Path }
@@ -221,7 +220,7 @@ function Invoke-CpBash {
 
 # _cp_launch wraps every session in this so a trust dialog answered once is not
 # asked again in the next profile. A native launch has no _cp_launch, so call the
-# same code directly. Best effort by design: no Git Bash, or no python3 on the
+# same code directly. Best effort by design: no Git Bash, or no Python on the
 # other side, costs you a repeated prompt, not a failed launch.
 function Sync-CpPrompts {
     param([string]$Dir)
@@ -231,11 +230,12 @@ function Sync-CpPrompts {
     if ($Dir -eq (Get-CpBaseDir)) { return }
     $bash = Get-CpBash
     if (-not $bash) { return }
-    # Discarding stdout, which a successful sync does not produce anyway. The
-    # case this is really for: where python3 on PATH is the Microsoft Store's
-    # App Execution Alias rather than Python, it prints an advert and exits 0 --
-    # passing the `command -v python3` guard on the sh side and then printing
-    # that advert on every single launch. Errors still go to stderr and show.
+    # Discarding stdout, which a successful sync does not produce anyway.
+    # This used to be aimed at the Microsoft Store's App Execution Alias for
+    # python3 printing "Python was not found" on every launch, on the belief
+    # that the stub wrote to stdout. It writes to stderr and exits 49, so this
+    # never suppressed it; the sh side now probes for a Python that runs
+    # instead (_cp_python), which stops it at the source. Errors still show.
     & $bash (ConvertTo-CpPosixPath $script:CpScript) --sync-prompts (ConvertTo-CpPosixPath $Dir) | Out-Null
 }
 
@@ -271,51 +271,66 @@ function Start-CpClaude {
     $global:LASTEXITCODE = $code
 }
 
-function claude {
+# The management surface: everything that is not "start a session".
+#
+# Reached as `claude-profile` through the alias below rather than by being named
+# that outright. PowerShell reads every hyphenated command name as Verb-Noun and
+# warns at import time when the verb is not one of its approved ones -- "claude"
+# will never be one -- and since the line install.ps1 writes into $PROFILE is a
+# plain Import-Module, that warning would print on every session start. Aliases
+# are not verb-checked, so this is the one spelling that stays quiet.
+function Invoke-CpProfile {
     # No param block and no [CmdletBinding()] on purpose. Both would make
     # PowerShell try to bind --create, -p and friends as parameters of this
     # function; with neither, every token lands in $args untouched.
     $rest = @($args)
 
-    if ($rest.Count -ge 1 -and $rest[0] -eq 'profile') {
-        $sub = if ($rest.Count -gt 1) { @($rest[1..($rest.Count - 1)]) } else { @() }
-
-        # `claude profile <name> -- <args>`: one session in <name>, active
-        # profile untouched. Kept native because the thing it ends in is an
-        # interactive TUI, which cannot be run down a non-interactive bash -c.
-        #
-        # The separator cannot be tested for. PowerShell's parser treats a bare
-        # `--` as end-of-parameters and consumes it when calling a function, so
-        # `claude profile dev -- --version` arrives here as just dev, --version.
-        # Quoting it ('--') does survive, and so does a second one, which is why
-        # the strip below is conditional rather than assumed.
-        #
-        # Detecting the form by shape instead is safe: the setter takes exactly
-        # one argument, so a bare name followed by anything at all can only have
-        # come from a separator that was eaten. Reading it as a set would take
-        # the trailing arguments and silently drop them.
-        if ($sub.Count -ge 2 -and -not $sub[0].StartsWith('-')) {
-            $name = $sub[0]
-            $from = if ($sub[1] -eq '--') { 2 } else { 1 }
-            $runArgs = if ($sub.Count -gt $from) { @($sub[$from..($sub.Count - 1)]) } else { @() }
-            $dir = Get-CpProfileDir $name
-            if (-not (Test-CpValidName $name) -or -not (Test-Path -LiteralPath $dir -PathType Container)) {
-                Write-CpError ('claude-profile: no such profile "{0}"' -f $name)
-                $global:LASTEXITCODE = 1
-                return
-            }
-            Start-CpClaude $dir $runArgs
+    # `claude-profile <name> -- <args>`: one session in <name>, active profile
+    # untouched. Kept native because the thing it ends in is an interactive TUI,
+    # which cannot be run down a non-interactive bash -c.
+    #
+    # The separator cannot be tested for. PowerShell's parser treats a bare `--`
+    # as end-of-parameters and consumes it when calling a function, so
+    # `claude-profile dev -- --version` arrives here as just dev, --version.
+    # Quoting it ('--') does survive, and so does a second one, which is why the
+    # strip below is conditional rather than assumed.
+    #
+    # Detecting the form by shape instead is safe: the setter takes exactly one
+    # argument, so a bare name followed by anything at all can only have come
+    # from a separator that was eaten. Reading it as a set would take the
+    # trailing arguments and silently drop them.
+    if ($rest.Count -ge 2 -and -not $rest[0].StartsWith('-')) {
+        $name = $rest[0]
+        $from = if ($rest[1] -eq '--') { 2 } else { 1 }
+        $runArgs = if ($rest.Count -gt $from) { @($rest[$from..($rest.Count - 1)]) } else { @() }
+        $dir = Get-CpProfileDir $name
+        if (-not (Test-CpValidName $name) -or -not (Test-Path -LiteralPath $dir -PathType Container)) {
+            Write-CpError ('claude-profile: no such profile "{0}"' -f $name)
+            $global:LASTEXITCODE = 1
             return
         }
-
-        # Everything else is management. bash inherits this process's working
-        # directory, so even bare `claude profile` walks up for a .claude-profile
-        # from where you actually are and reports the same answer we would.
-        Invoke-CpBash $sub
+        Start-CpClaude $dir $runArgs
         return
     }
 
-    Start-CpClaude (Resolve-CpConfigDir) $rest
+    # Everything else is management. bash inherits this process's working
+    # directory, so even a bare `claude-profile` walks up for a .claude-profile
+    # from where you actually are and reports the same answer we would.
+    Invoke-CpBash $rest
 }
 
-Export-ModuleMember -Function claude
+Set-Alias -Name claude-profile -Value Invoke-CpProfile
+
+# The whole reason the import line is worth having: a `claude` that follows the
+# active profile rather than always reading ~/.claude. Management lives in
+# claude-profile, not behind a subcommand of this.
+function claude {
+    # No param block and no [CmdletBinding()] on purpose, for the same reason as
+    # Invoke-CpProfile above: every token has to reach $args untouched.
+    Start-CpClaude (Resolve-CpConfigDir) @($args)
+}
+
+# Invoke-CpProfile is exported alongside its alias deliberately. An exported
+# alias whose target is not itself exported is resolvable only from inside the
+# module's session state, which is not where anyone types.
+Export-ModuleMember -Function claude, Invoke-CpProfile -Alias claude-profile

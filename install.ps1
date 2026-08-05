@@ -1,9 +1,10 @@
 # Add the Import-Module line for claude-profile.psm1 to your PowerShell profile,
 # then prove it worked. Safe to re-run: an install that is already correct is a
 # no-op. The PowerShell counterpart of install.sh, and it exists for the same
-# reason -- without that line there is no `claude` function, so `claude profile`
-# reaches claude.exe, which treats "profile" as your opening prompt and drops you
-# into a session. Nothing about that says "this was never installed".
+# reason -- without that line there is no `claude-profile` command to manage
+# anything with, and no `claude` function either, so claude.exe runs against
+# ~/.claude and every session quietly ignores the profile you selected. Nothing
+# about that says "this was never installed".
 #
 # Usage: .\install.ps1 [-ProfilePath <path>] [-Help]
 #
@@ -142,30 +143,41 @@ if ($target -like '*OneDrive*') {
 }
 
 # Prove it. A line in a file is not an install; the test is whether the shell you
-# type into ends up with `claude` as a function rather than an application.
+# type into ends up with `claude` as a function rather than an application, and
+# `claude-profile` as the alias carrying the management surface. Both, because
+# either one alone is a half-install that looks fine until you reach for the
+# other: no function and every session silently reads ~/.claude, no alias and
+# there is nothing to manage profiles with.
+#
+# The types are read in one probe so a fresh session is started once. -f rather
+# than .ToString() on the results: a command that does not exist leaves $null
+# here, which -f renders as empty and .ToString() would throw on.
+$probeExpr = "'{0} {1}' -f (Get-Command claude -ErrorAction SilentlyContinue).CommandType, (Get-Command claude-profile -ErrorAction SilentlyContinue).CommandType"
+
 $hostExe = $null
 try { $hostExe = (Get-Process -Id $PID).Path } catch { }
 if (-not $hostExe) { $hostExe = 'powershell.exe' }
 
 if ($explicit) {
     # An explicit path can point anywhere, including at a file no host would read,
-    # so the honest claim is narrower: dot-sourcing it defines the wrapper.
-    $probe = ". '" + ($target -replace "'", "''") + "'; (Get-Command claude -ErrorAction SilentlyContinue).CommandType"
+    # so the honest claim is narrower: dot-sourcing it defines the two commands.
+    $probe = ". '" + ($target -replace "'", "''") + "'; $probeExpr"
     $seen = & $hostExe -NoLogo -NonInteractive -NoProfile -Command $probe
-    if ("$seen".Trim() -eq 'Function') {
-        Say "verified: loading $target defines the claude wrapper"
+    if ("$seen".Trim() -eq 'Function Alias') {
+        Say "verified: loading $target defines claude and claude-profile"
         Say "note: -ProfilePath given, so whether a shell reads that file was not checked"
     } else {
-        Die "wrote $target, but loading it does not define the claude wrapper (got '$seen')."
+        Die "wrote $target, but loading it does not define both commands (got '$seen', wanted 'Function Alias')."
     }
 } else {
-    $seen = & $hostExe -NoLogo -NonInteractive -Command '(Get-Command claude -ErrorAction SilentlyContinue).CommandType'
-    if ("$seen".Trim() -eq 'Function') {
-        Say "verified: a new PowerShell session defines the wrapper"
+    $seen = & $hostExe -NoLogo -NonInteractive -Command $probeExpr
+    if ("$seen".Trim() -eq 'Function Alias') {
+        Say "verified: a new PowerShell session defines claude and claude-profile"
     } else {
         Die @"
-wrote $target, but a new PowerShell session does not define the claude
-     wrapper (got '$seen'). Run this by hand to see the error:
+wrote $target, but a new PowerShell session does not define both the claude
+     wrapper and the claude-profile alias (got '$seen', wanted 'Function Alias').
+     Run this by hand to see the error:
 
          $line
 "@
@@ -179,8 +191,8 @@ Say "    $line"
 Say ""
 Say "Then:"
 Say ""
-Say "    claude profile --create development"
-Say "    claude profile development"
+Say "    claude-profile --create development"
+Say "    claude-profile development"
 Say ""
 Say "This covers PowerShell only. Git Bash needs its own install:"
 Say ""

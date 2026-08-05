@@ -60,11 +60,37 @@ _cp_cmd_status() {
 
 _CP_RUNNER=${_CP_RUNNER:-}
 
+# Skips anything inside the install dir so `command claude` cannot loop back into our own shim.
+_cp_real_claude() {
+    _rc_skip=$(_cp_install_dir)
+    # Split PATH on ':' by hand: zsh does not word-split unquoted $PATH, so
+    # `set -- $PATH` would hand us the whole string as one element.
+    _rc_rest=$PATH
+    while [ -n "$_rc_rest" ]; do
+        case "$_rc_rest" in
+            *:*) _rc_d=${_rc_rest%%:*}; _rc_rest=${_rc_rest#*:} ;;
+            *)   _rc_d=$_rc_rest; _rc_rest= ;;
+        esac
+        [ -n "$_rc_d" ] || _rc_d=.
+        [ -f "$_rc_d/claude" ] && [ -x "$_rc_d/claude" ] || continue
+        case "$(_cp_deref "$_rc_d/claude")" in
+            "$_rc_skip"/*) continue ;;
+        esac
+        printf '%s' "$_rc_d/claude"
+        return 0
+    done
+    return 1
+}
+
 _cp_run_claude() {
     if [ -n "$_CP_RUNNER" ]; then
         "$_CP_RUNNER" "$@"
     else
-        command claude "$@"
+        _rc_bin=$(_cp_real_claude) || {
+            printf 'claude-profile: no claude binary on PATH\n' >&2
+            return 127
+        }
+        "$_rc_bin" "$@"
     fi
 }
 

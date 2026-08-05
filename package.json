@@ -1,0 +1,25 @@
+{
+  "name": "claude-profiles",
+  "version": "0.1.0",
+  "description": "Switch Claude Code between isolated config profiles from any shell",
+  "license": "MIT",
+  "bin": {
+    "claude-profile-install": "bin/claude-profile-install.mjs"
+  },
+  "files": [
+    "claude-profile.sh",
+    "claude-profile.psm1",
+    "lib",
+    "bin",
+    "scripts",
+    "install.sh",
+    "install.ps1",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.mjs",
+    "test": "sh test.sh"
+  },
+  "engines": { "node": ">=18" }
+}
