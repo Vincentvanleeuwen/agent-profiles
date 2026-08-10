@@ -788,6 +788,17 @@ check_with "sourcing defines claude-profile under zsh" zsh \
 check_with "sourced claude-profile reaches the dispatcher" bash \
    'env $XENV bash -c ". \"$CPX\"; claude-profile" | grep -q "^store: "'
 
+# A `claude` that misses the wrapper — raw binary earlier on PATH, another tool
+# spawning it — must still land in the active profile, or `claude plugins
+# install` writes its enabledPlugins entry into the base config.
+# shellcheck disable=SC2086 # $XENV holds space-separated KEY=VALUE pairs for env to split
+out=$(env $XENV CLAUDE_PROFILE=xprof bash -c ". \"$CPX\"; printenv CLAUDE_CONFIG_DIR" 2>&1)
+eq "sourcing exports CLAUDE_CONFIG_DIR for the active profile" \
+   "$out" "$TMP/xstore/profiles/xprof"
+# shellcheck disable=SC2086 # same
+out=$(env $XENV bash -c ". \"$CPX\"; printenv CLAUDE_CONFIG_DIR" 2>&1)
+eq "sourcing with no profile exports the base config dir" "$out" "$FAKEHOME/.claude"
+
 # `claude` launches sessions and nothing else now, so `profile` is an ordinary
 # argument and has to arrive at the runner rather than be eaten as a subcommand.
 # Asserting where it lands, not merely that nothing failed: an argument silently

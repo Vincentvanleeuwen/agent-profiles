@@ -59,6 +59,20 @@ _cp_selected() {
     return 0
 }
 
+# Every `claude` that misses the shell function reads ~/.claude: the raw binary
+# further up PATH, another tool spawning it, a session's own shell. That is how
+# `claude plugins install` writes enabledPlugins into the base config instead of
+# the active profile. Exporting the resolved directory closes all of those at
+# once, since Claude Code reads CLAUDE_CONFIG_DIR wherever it is started from.
+# Only ever exported for a directory that exists — a stale profile name would
+# otherwise point Claude Code at an empty config it then happily creates.
+_cp_export_config_dir() {
+    _xd=$(_cp_resolve 2>/dev/null) || return 0
+    [ -d "$_xd" ] || return 0
+    CLAUDE_CONFIG_DIR="$_xd"
+    export CLAUDE_CONFIG_DIR
+}
+
 # Prints the config directory to use.
 _cp_resolve() {
     _sel=$(_cp_selected)

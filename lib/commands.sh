@@ -24,6 +24,7 @@ _cp_cmd_set() {
         printf 'claude-profile: could not write %s/active\n' "$(_cp_store)" >&2
         return 1
     fi
+    _cp_export_config_dir
     printf 'active profile: %s\n' "$_n"
 }
 
@@ -33,6 +34,7 @@ _cp_cmd_default() {
         printf 'claude-profile: could not remove %s/active\n' "$(_cp_store)" >&2
         return 1
     fi
+    _cp_export_config_dir
     printf 'active profile: none (using ~/.claude)\n'
 }
 

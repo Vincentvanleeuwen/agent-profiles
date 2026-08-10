@@ -199,3 +199,7 @@ if [ -n "${_CP_EXEC:-}" ]; then
     _cp_main "$@"
     exit $?
 fi
+
+# Sourced: point everything in this shell at the active profile, not only the
+# two functions above. See _cp_export_config_dir.
+_cp_export_config_dir
