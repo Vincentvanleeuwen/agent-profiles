@@ -4,6 +4,6 @@ active
 .backups/
 .DS_Store
 .superpowers/
-docs/
+docs/superpowers/
 prompt-state.json
 graphify-out/
