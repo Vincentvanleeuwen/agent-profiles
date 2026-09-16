@@ -39,9 +39,19 @@ function Set-CpEnv {
     }
 }
 
+function Get-CpHome {
+    # $env:HOME first, then PowerShell's $HOME. Git Bash takes HOME from the
+    # environment whenever it is set, and a good number of Windows setups do set
+    # it; PowerShell's $HOME comes from USERPROFILE and ignores it. Reading only
+    # $HOME here would leave the two halves of this tool disagreeing about where
+    # the base ~/.claude is, on exactly the machines that had customised it.
+    if ($env:HOME) { return $env:HOME }
+    return $HOME
+}
+
 function Get-CpStore {
     if ($env:CLAUDE_PROFILES_DIR) { return $env:CLAUDE_PROFILES_DIR }
-    return $script:CpRoot
+    return (Join-Path (Get-CpHome) '.agent-profiles')
 }
 
 function Get-CpProfileDir {
@@ -50,13 +60,7 @@ function Get-CpProfileDir {
 }
 
 function Get-CpBaseDir {
-    # $env:HOME first, then PowerShell's $HOME. Git Bash takes HOME from the
-    # environment whenever it is set, and a good number of Windows setups do set
-    # it; PowerShell's $HOME comes from USERPROFILE and ignores it. Reading only
-    # $HOME here would leave the two halves of this tool disagreeing about where
-    # the base ~/.claude is, on exactly the machines that had customised it.
-    $h = if ($env:HOME) { $env:HOME } else { $HOME }
-    return (Join-Path $h '.claude')
+    return (Join-Path (Get-CpHome) '.claude')
 }
 
 # E:\Codeshit\x -> /e/Codeshit/x
@@ -170,6 +174,105 @@ function Resolve-CpConfigDir {
     if (Test-Path -LiteralPath $dir -PathType Container) { return $dir }
     Write-CpError ('claude-profile: unknown profile "{0}", using ~/.claude' -f $sel.Name)
     return (Get-CpBaseDir)
+}
+
+function Get-CpCodexConfig {
+    return (Join-Path (Join-Path (Get-CpHome) '.codex') 'config.toml')
+}
+
+function Get-CpCodexDefault {
+    return (Join-Path (Get-CpStore) 'codex-default.config.toml')
+}
+
+function Get-CpCodexProfile {
+    param([string]$Name)
+    return (Join-Path (Get-CpProfileDir $Name) 'codex.config.toml')
+}
+
+function Copy-CpFileAtomic {
+    param([string]$Source, [string]$Destination)
+    $dir = Split-Path -Parent $Destination
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
+    $tmp = "$Destination.tmp.$PID"
+    try {
+        Copy-Item -LiteralPath $Source -Destination $tmp -Force
+        if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+            [IO.File]::Replace($tmp, $Destination, $null)
+        } else {
+            [IO.File]::Move($tmp, $Destination)
+        }
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Write-CpTextAtomic {
+    param([string]$Destination, [string]$Text)
+    $dir = Split-Path -Parent $Destination
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    }
+    $tmp = "$Destination.tmp.$PID"
+    try {
+        [IO.File]::WriteAllText($tmp, $Text, (New-Object System.Text.UTF8Encoding($false)))
+        if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+            [IO.File]::Replace($tmp, $Destination, $null)
+        } else {
+            [IO.File]::Move($tmp, $Destination)
+        }
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Initialize-CpCodexDefault {
+    $default = Get-CpCodexDefault
+    if (Test-Path -LiteralPath $default -PathType Leaf) { return }
+    $live = Get-CpCodexConfig
+    if (Test-Path -LiteralPath $live -PathType Leaf) {
+        Copy-CpFileAtomic $live $default
+    } else {
+        Write-CpTextAtomic $default ''
+    }
+}
+
+function Save-CpCodexCurrent {
+    $live = Get-CpCodexConfig
+    if (-not (Test-Path -LiteralPath $live -PathType Leaf)) { return }
+    $active = Read-CpName (Join-Path (Get-CpStore) 'active')
+    $destination = if ($active -and (Test-Path -LiteralPath (Get-CpProfileDir $active) -PathType Container)) {
+        Get-CpCodexProfile $active
+    } else {
+        Get-CpCodexDefault
+    }
+    Copy-CpFileAtomic $live $destination
+}
+
+function Set-CpActiveProfile {
+    param([string]$Name)
+    $dir = Get-CpProfileDir $Name
+    if (-not (Test-CpValidName $Name) -or -not (Test-Path -LiteralPath $dir -PathType Container)) {
+        throw ('claude-profile: no such profile "{0}"' -f $Name)
+    }
+    Initialize-CpCodexDefault
+    Save-CpCodexCurrent
+    $target = Get-CpCodexProfile $Name
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+        Copy-CpFileAtomic (Get-CpCodexDefault) $target
+    }
+    Copy-CpFileAtomic $target (Get-CpCodexConfig)
+    Write-CpTextAtomic (Join-Path (Get-CpStore) 'active') "$Name`n"
+    $env:CLAUDE_CONFIG_DIR = $dir
+}
+
+function Set-CpDefaultProfile {
+    Initialize-CpCodexDefault
+    Save-CpCodexCurrent
+    Copy-CpFileAtomic (Get-CpCodexDefault) (Get-CpCodexConfig)
+    Remove-Item -LiteralPath (Join-Path (Get-CpStore) 'active') -Force -ErrorAction SilentlyContinue
+    $env:CLAUDE_CONFIG_DIR = (Get-CpBaseDir)
 }
 
 # Mirrors _cp_valid_name. Only used where the sh side uses it too (_cp_need,
@@ -293,6 +396,30 @@ function Invoke-CpProfile {
     # function; with neither, every token lands in $args untouched.
     $rest = @($args)
 
+    if ($rest.Count -eq 1 -and $rest[0] -eq 'default') {
+        try {
+            Set-CpDefaultProfile
+            Write-Host 'active profile: none (using ~/.claude)'
+            $global:LASTEXITCODE = 0
+        } catch {
+            Write-CpError $_.Exception.Message
+            $global:LASTEXITCODE = 1
+        }
+        return
+    }
+
+    if ($rest.Count -eq 1 -and -not ([string]$rest[0]).StartsWith('-')) {
+        try {
+            Set-CpActiveProfile $rest[0]
+            Write-Host ('active profile: {0}' -f $rest[0])
+            $global:LASTEXITCODE = 0
+        } catch {
+            Write-CpError $_.Exception.Message
+            $global:LASTEXITCODE = 1
+        }
+        return
+    }
+
     # `claude-profile <name> -- <args>`: one session in <name>, active profile
     # untouched. Kept native because the thing it ends in is an interactive TUI,
     # which cannot be run down a non-interactive bash -c.
@@ -307,7 +434,7 @@ function Invoke-CpProfile {
     # argument, so a bare name followed by anything at all can only have come
     # from a separator that was eaten. Reading it as a set would take the
     # trailing arguments and silently drop them.
-    if ($rest.Count -ge 2 -and -not $rest[0].StartsWith('-')) {
+    if ($rest.Count -ge 2 -and -not ([string]$rest[0]).StartsWith('-')) {
         $name = $rest[0]
         $from = if ($rest[1] -eq '--') { 2 } else { 1 }
         $runArgs = if ($rest.Count -gt $from) { @($rest[$from..($rest.Count - 1)]) } else { @() }

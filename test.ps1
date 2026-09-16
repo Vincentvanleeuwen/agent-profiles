@@ -105,6 +105,11 @@ $env:HOME = $fakeHome
 $env:CLAUDE_PROFILES_DIR = $store
 $env:CLAUDE_PROFILE = $null
 
+$env:CLAUDE_PROFILES_DIR = $null
+Check 'store: defaults under HOME' (Join-Path $fakeHome '.agent-profiles') (& $mod { Get-CpStore })
+$env:CLAUDE_PROFILES_DIR = $store
+Check 'store: honours override' $store (& $mod { Get-CpStore })
+
 function Utf8NoBom { param([string]$Path, [string]$Text)
     [IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -150,6 +155,35 @@ try {
     Check 'read: UTF-8 BOM' 'work' (& $mod { Read-CpName $args[0] } $nameFile)
 
     Check 'read: missing file' '' (& $mod { Read-CpName $args[0] } (Join-Path $root 'nope.txt'))
+
+    $codexDir = Join-Path $fakeHome '.codex'
+    $codexConfig = Join-Path $codexDir 'config.toml'
+    $defaultCodex = Join-Path $store 'codex-default.config.toml'
+    $workCodex = Join-Path $store 'profiles\work\codex.config.toml'
+    $financeCodex = Join-Path $store 'profiles\finance\codex.config.toml'
+    New-Item -ItemType Directory -Force -Path $codexDir | Out-Null
+    Utf8NoBom $codexConfig 'model = "default"'
+    Utf8NoBom $workCodex 'model = "work"'
+    Utf8NoBom $financeCodex 'model = "finance"'
+
+    & $mod { Set-CpActiveProfile 'work' }
+    Check 'codex: activates profile settings' 'model = "work"' ([IO.File]::ReadAllText($codexConfig).Trim())
+    Check 'codex: preserves default settings' 'model = "default"' ([IO.File]::ReadAllText($defaultCodex).Trim())
+    Check 'codex: live config is a real file' $false ((Get-Item -LiteralPath $codexConfig).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint))
+
+    Utf8NoBom $codexConfig 'model = "edited"'
+    & $mod { Set-CpActiveProfile 'finance' }
+    Check 'codex: snapshots outgoing profile' 'model = "edited"' ([IO.File]::ReadAllText($workCodex).Trim())
+    Check 'codex: switches to next profile' 'model = "finance"' ([IO.File]::ReadAllText($codexConfig).Trim())
+
+    & $mod { Set-CpDefaultProfile }
+    Check 'codex: restores default settings' 'model = "default"' ([IO.File]::ReadAllText($codexConfig).Trim())
+    Check 'codex: default clears active marker' $false (Test-Path -LiteralPath (Join-Path $store 'active'))
+
+    Remove-Item -LiteralPath $financeCodex -Force
+    & $mod { Set-CpActiveProfile 'finance' }
+    Check 'codex: seeds missing profile settings' 'model = "default"' ([IO.File]::ReadAllText($financeCodex).Trim())
+    & $mod { Set-CpDefaultProfile }
 
     # --- resolution precedence -----------------------------------------------
 
