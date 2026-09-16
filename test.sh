@@ -1306,7 +1306,9 @@ check "install creates a missing rc for a known shell" \
 
 # Two candidates and nothing to choose between them is where it must stop.
 IH4="$TMP/ihome4"; mkdir -p "$IH4"; : > "$IH4/.zshrc"; : > "$IH4/.bashrc"
-env HOME="$IH4" sh -c "SHELL=/bin/sh \"$HERE/install.sh\" --no-migrate" >/dev/null 2>&1
+env HOME="$IH4" SHELL=/bin/sh python3 -c \
+    'import subprocess,sys; sys.exit(subprocess.call([sys.argv[1], "--no-migrate"]))' \
+    "$HERE/install.sh" >/dev/null 2>&1
 eq "install stops when both rc files exist and \$SHELL is unhelpful" "$?" "1"
 check "install left both candidate rc files alone" \
    '[ ! -s "$IH4/.zshrc" ] && [ ! -s "$IH4/.bashrc" ]'
