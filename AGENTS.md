@@ -1,10 +1,10 @@
-# claude-profiles
+# agent-profiles
 
 ## Agent skills
 
 ### Issue tracker
 
-Issues live as GitHub issues on `Vincentvanleeuwen/claude-profiles`, driven through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues live as GitHub issues on `Vincentvanleeuwen/agent-profiles`, driven through the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

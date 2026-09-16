@@ -46,6 +46,8 @@ Check 'claude is exported as a function' 'Function' `
     (Get-Command claude -ErrorAction SilentlyContinue).CommandType
 Check 'claude-profile is exported as an alias' 'Alias' `
     (Get-Command claude-profile -ErrorAction SilentlyContinue).CommandType
+Check 'agent-profile is exported as an alias' 'Alias' `
+    (Get-Command agent-profile -ErrorAction SilentlyContinue).CommandType
 Check 'claude-profile resolves to the dispatcher' 'Invoke-CpProfile' `
     (Get-Command claude-profile -ErrorAction SilentlyContinue).Definition
 # An exported alias whose target is not itself exported resolves only inside the

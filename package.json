@@ -1,9 +1,10 @@
 {
-  "name": "claude-profiles",
+  "name": "agent-profiles",
   "version": "0.1.0",
-  "description": "Switch Claude Code between isolated config profiles from any shell",
+  "description": "Switch Claude Code and Codex between isolated config profiles",
   "license": "MIT",
   "bin": {
+    "agent-profile-install": "bin/claude-profile-install.mjs",
     "claude-profile-install": "bin/claude-profile-install.mjs"
   },
   "files": [

@@ -25,7 +25,8 @@ _cp_cmd_update() {
     _n="$1"
     _cp_need "$_n" || return 1
     _from=$(_cp_resolve)
-    if [ "$_from" = "$(_cp_dir "$_n")" ]; then
+    _active=$(_cp_read_name "$(_cp_store)/active" 2>/dev/null)
+    if [ "$_from" = "$(_cp_dir "$_n")" ] || [ "$_active" = "$_n" ]; then
         printf 'claude-profile: "%s" is the active source; switch away first\n' "$_n" >&2
         return 1
     fi
@@ -35,6 +36,10 @@ _cp_cmd_update() {
     fi
     if ! _cp_build "$_from" "$(_cp_dir "$_n")"; then
         printf 'claude-profile: failed to rebuild "%s"; previous contents at %s\n' "$_n" "$_bk" >&2
+        return 1
+    fi
+    if ! _cp_codex_snapshot "$_n"; then
+        printf 'claude-profile: failed to snapshot Codex config for "%s"; previous contents at %s\n' "$_n" "$_bk" >&2
         return 1
     fi
     printf 'backed up -> %s\n' "$_bk"
@@ -67,6 +72,13 @@ _cp_cmd_reset() {
         return 1
     fi
     rmdir "$_empty"
+    if ! _cp_codex_prepare_default || ! _cp_codex_copy "$(_cp_codex_default)" "$(_cp_codex_profile "$_n")"; then
+        printf 'claude-profile: failed to reset Codex config for "%s"; previous contents at %s\n' "$_n" "$_bk" >&2
+        return 1
+    fi
+    if [ "$(_cp_read_name "$(_cp_store)/active" 2>/dev/null)" = "$_n" ]; then
+        _cp_codex_activate "$_n" || return 1
+    fi
     printf 'backed up -> %s\n' "$_bk"
     printf 'reset %s (fresh config; shared paths still linked to base)\n' "$_n"
 }
@@ -87,7 +99,18 @@ _cp_cmd_delete() {
     # be named in active without being the selected one — clear the dangling
     # pointer rather than warn on every invocation forever, same as rename.
     if [ "$(_cp_read_name "$(_cp_store)/active" 2>/dev/null)" = "$_n" ]; then
-        rm -f "$(_cp_store)/active"
+        if ! rm -f "$(_cp_store)/active" || [ -e "$(_cp_store)/active" ]; then
+            mv "$_bk" "$(_cp_dir "$_n")"
+            printf 'claude-profile: could not remove %s/active; deletion rolled back\n' "$(_cp_store)" >&2
+            return 1
+        fi
+        if ! _cp_codex_activate_default; then
+            mv "$_bk" "$(_cp_dir "$_n")"
+            printf '%s\n' "$_n" > "$(_cp_store)/active"
+            _cp_codex_activate "$_n" >/dev/null 2>&1
+            printf 'claude-profile: could not restore the default Codex config; deletion rolled back\n' >&2
+            return 1
+        fi
     fi
     printf 'deleted %s (kept at %s)\n' "$_n" "$_bk"
 }
@@ -103,11 +126,25 @@ _cp_cmd_rename() {
     # Third argument is the OLD profile dir: after the mv, settings.json still
     # carries the old profile's paths, and that pass is what retargets them.
     if ! _cp_rewrite "$(_cp_dir "$_n")/settings.json" "$(_cp_dir "$_n")" "$(_cp_dir "$_o")"; then
-        printf 'claude-profile: renamed to "%s" but path rewrite failed; fix settings.json paths manually\n' "$_n" >&2
+        mv "$(_cp_dir "$_n")" "$(_cp_dir "$_o")"
+        printf 'claude-profile: path rewrite failed; rename rolled back\n' >&2
         return 1
     fi
     if [ "$(_cp_read_name "$(_cp_store)/active" 2>/dev/null)" = "$_o" ]; then
-        printf '%s\n' "$_n" > "$(_cp_store)/active"
+        if ! printf '%s\n' "$_n" > "$(_cp_store)/active"; then
+            _cp_rewrite "$(_cp_dir "$_n")/settings.json" "$(_cp_dir "$_o")" "$(_cp_dir "$_n")" >/dev/null 2>&1
+            mv "$(_cp_dir "$_n")" "$(_cp_dir "$_o")"
+            printf 'claude-profile: could not write %s/active; rename rolled back\n' "$(_cp_store)" >&2
+            return 1
+        fi
+        if ! _cp_codex_activate "$_n"; then
+            _cp_rewrite "$(_cp_dir "$_n")/settings.json" "$(_cp_dir "$_o")" "$(_cp_dir "$_n")" >/dev/null 2>&1
+            mv "$(_cp_dir "$_n")" "$(_cp_dir "$_o")"
+            printf '%s\n' "$_o" > "$(_cp_store)/active"
+            _cp_codex_activate "$_o" >/dev/null 2>&1
+            printf 'claude-profile: could not activate Codex config for "%s"; rename rolled back\n' "$_n" >&2
+            return 1
+        fi
     fi
     printf 'renamed %s -> %s\n' "$_o" "$_n"
 }
@@ -116,6 +153,7 @@ _cp_cmd_copy() {
     _s="$1"; _n="$2"
     _cp_need "$_s" || return 1
     _cp_free "$_n" || return 1
+    _cp_codex_ensure "$_s" || return 1
     if ! _cp_build "$(_cp_dir "$_s")" "$(_cp_dir "$_n")"; then
         printf 'claude-profile: failed to copy "%s"\n' "$_s" >&2
         rm -rf "$(_cp_dir "$_n")"
@@ -123,4 +161,3 @@ _cp_cmd_copy() {
     fi
     printf 'copied %s -> %s\n' "$_s" "$_n"
 }
-

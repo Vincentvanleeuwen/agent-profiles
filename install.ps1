@@ -152,7 +152,7 @@ if ($target -like '*OneDrive*') {
 # The types are read in one probe so a fresh session is started once. -f rather
 # than .ToString() on the results: a command that does not exist leaves $null
 # here, which -f renders as empty and .ToString() would throw on.
-$probeExpr = "'{0} {1}' -f (Get-Command claude -ErrorAction SilentlyContinue).CommandType, (Get-Command claude-profile -ErrorAction SilentlyContinue).CommandType"
+$probeExpr = "'{0} {1}' -f (Get-Command claude -ErrorAction SilentlyContinue).CommandType, (Get-Command agent-profile -ErrorAction SilentlyContinue).CommandType"
 
 $hostExe = $null
 try { $hostExe = (Get-Process -Id $PID).Path } catch { }
@@ -164,7 +164,7 @@ if ($explicit) {
     $probe = ". '" + ($target -replace "'", "''") + "'; $probeExpr"
     $seen = & $hostExe -NoLogo -NonInteractive -NoProfile -Command $probe
     if ("$seen".Trim() -eq 'Function Alias') {
-        Say "verified: loading $target defines claude and claude-profile"
+        Say "verified: loading $target defines claude and agent-profile"
         Say "note: -ProfilePath given, so whether a shell reads that file was not checked"
     } else {
         Die "wrote $target, but loading it does not define both commands (got '$seen', wanted 'Function Alias')."
@@ -172,11 +172,11 @@ if ($explicit) {
 } else {
     $seen = & $hostExe -NoLogo -NonInteractive -Command $probeExpr
     if ("$seen".Trim() -eq 'Function Alias') {
-        Say "verified: a new PowerShell session defines claude and claude-profile"
+        Say "verified: a new PowerShell session defines claude and agent-profile"
     } else {
         Die @"
 wrote $target, but a new PowerShell session does not define both the claude
-     wrapper and the claude-profile alias (got '$seen', wanted 'Function Alias').
+     wrapper and the agent-profile alias (got '$seen', wanted 'Function Alias').
      Run this by hand to see the error:
 
          $line
@@ -191,8 +191,8 @@ Say "    $line"
 Say ""
 Say "Then:"
 Say ""
-Say "    claude-profile --create development"
-Say "    claude-profile development"
+Say "    agent-profile --create development"
+Say "    agent-profile development"
 Say ""
 Say "This covers PowerShell only. Git Bash needs its own install:"
 Say ""

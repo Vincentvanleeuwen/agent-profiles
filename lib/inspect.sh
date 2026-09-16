@@ -187,6 +187,7 @@ _cp_owned() {
 _cp_cmd_export() {
     _n="$1"
     _cp_need "$_n" || return 1
+    _cp_codex_ensure "$_n" || return 1
     if [ -n "${2:-}" ]; then
         _out="$2"
     else
@@ -266,5 +267,6 @@ _cp_cmd_import() {
         # machine's profile paths, and there is no meaningful source dir here.
         _cp_rewrite "$_d/settings.json" "$_d" || { rm -rf "$_d"; return 1; }
     fi
+    _cp_codex_ensure "$_n" || { rm -rf "$_d"; return 1; }
     printf 'imported %s <- %s\n' "$_n" "$_f"
 }

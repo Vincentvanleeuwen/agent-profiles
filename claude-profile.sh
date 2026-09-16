@@ -1,9 +1,9 @@
 #!/bin/sh
-# claude-profile — switch Claude Code between named configuration profiles.
+# agent-profile — switch AI coding tools between named configuration profiles.
 # POSIX sh; runs under zsh and bash.
 #
 # Two ways in. Sourced from ~/.zshrc or ~/.bashrc — what install.sh sets up —
-# you get a `claude-profile` function for every subcommand, and a bare `claude`
+# you get an `agent-profile` function for every subcommand, and a bare `claude`
 # picks up the active profile. Executed instead (./claude-profile.sh --create dev)
 # nothing needs installing, and everything works except that shadowing: only a
 # function already in your shell can make a plain `claude` follow the active
@@ -45,7 +45,7 @@ else
     # from running _cp_main on the caller's arguments.
     _CP_SELF="$0"
     case "$0" in
-        claude-profile|claude-profile.sh|*/claude-profile|*/claude-profile.sh)
+        agent-profile|claude-profile|claude-profile.sh|*/agent-profile|*/claude-profile|*/claude-profile.sh)
             _CP_EXEC=1 ;;
     esac
 fi
@@ -86,27 +86,27 @@ unset _cp_f
 
 _cp_cmd_help() {
     cat <<'EOF'
-claude-profile                       show active profile and list all
-claude-profile <name>                set the active profile
-claude-profile default               clear the active profile (back to ~/.claude)
-claude-profile <name> -- <args>      run one session in <name>, active unchanged
+agent-profile                       show active profile and list all
+agent-profile <name>                set the active profile
+agent-profile default               clear the active profile (back to ~/.claude)
+agent-profile <name> -- <args>      run one session in <name>, active unchanged
 
-claude-profile --create <name>       snapshot the current setup into a new profile
-claude-profile --update <name>       mirror the current setup into an existing profile
-claude-profile --reset [name]        wipe a profile back to a fresh config (default: active)
-claude-profile --delete <name>       delete a profile (backed up first)
-claude-profile --rename <a> <b>      rename a profile
-claude-profile --copy <a> <b>        duplicate a profile
+agent-profile --create <name>       snapshot the current setup into a new profile
+agent-profile --update <name>       mirror the current setup into an existing profile
+agent-profile --reset [name]        wipe a profile back to a fresh config (default: active)
+agent-profile --delete <name>       delete a profile (backed up first)
+agent-profile --rename <a> <b>      rename a profile
+agent-profile --copy <a> <b>        duplicate a profile
 
-claude-profile --show [name]         model, plugins, skills, hooks, mcp servers
-claude-profile --diff <a> <b>        the same, for two profiles
-claude-profile --path [name]         print where a profile's config lives
-claude-profile --open [name]         open that directory in your file manager
+agent-profile --show [name]         model, plugins, skills, hooks, mcp servers
+agent-profile --diff <a> <b>        the same, for two profiles
+agent-profile --path [name]         print where a profile's config lives
+agent-profile --open [name]         open that directory in your file manager
 
-claude-profile --export <name> [f]   tarball to exports/ (no credentials)
-claude-profile --import <file> [n]   create a profile from a tarball
+agent-profile --export <name> [f]   tarball to exports/ (no credentials)
+agent-profile --import <file> [n]   create a profile from a tarball
 
-claude-profile --migrate-store <dir>   move a store out of an old clone
+agent-profile --migrate-store <dir>   move a store out of an old clone
 
 Where [name] is optional it defaults to the profile you are in right now.
 
@@ -155,7 +155,7 @@ _cp_main() {
 
 # The whole reason the source line is worth having: a `claude` that follows the
 # active profile rather than always reading ~/.claude. Management lives in
-# claude-profile, not behind a subcommand of this.
+# agent-profile, not behind a subcommand of this.
 claude() {
     _cp_launch "$(_cp_resolve)" "$@"
 }
@@ -187,6 +187,7 @@ if [ -n "${BASH_VERSION:-}" ]; then
     esac
 fi
 if [ -n "$_cp_fn_hyphen" ]; then
+    eval 'agent-profile() { _cp_main "$@"; }'
     eval 'claude-profile() { _cp_main "$@"; }'
 fi
 unset _cp_fn_hyphen

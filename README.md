@@ -1,26 +1,28 @@
-# Claude Profiles
+# Agent Profiles
 
-Switch Claude Code between named configuration profiles — different enabled
-plugins, skills, commands, hooks, MCP servers, model and permissions per
-profile — without editing `~/.claude` by hand.
+Switch Claude Code and Codex between named configuration profiles without
+editing `~/.claude` or `~/.codex` by hand.
 
 A profile is a complete `CLAUDE_CONFIG_DIR`. Claude Code honours that variable
-natively, so switching is just pointing it somewhere else.
+natively, so switching is just pointing it somewhere else. Each profile also
+owns a `codex.config.toml`. The switcher links `~/.codex/config.toml` to that
+file, which covers both the Codex CLI and desktop app. Claude settings are not
+translated; each tool keeps its native configuration.
 
 ## Install
 
 ```sh
-npm i -g claude-profiles
+npm i -g agent-profiles
 ```
 
 or, from a clone:
 
 ```sh
-git clone <this repo> ~/claude-profiles
-~/claude-profiles/install.sh
+git clone <this repo> ~/agent-profiles
+~/agent-profiles/install.sh
 ```
 
-Either way you end up with two things on PATH: `claude-profile`, a new command
+Either way you end up with two things on PATH: `agent-profile`, a new command
 for managing profiles, and a `claude` wrapper that points the real binary at
 whichever profile is active. Both are copied into a stable `~/.claude-profile`
 (singular — a different directory from where your profiles themselves live,
@@ -34,9 +36,15 @@ anything, if that resolves to `/`, to `$HOME` itself, or to an ancestor of
 that catastrophic. It also refuses early, before anything is touched, if
 `$HOME` itself does not resolve to a real directory.
 
+`claude-profile` remains an alias for existing scripts. The legacy
+`~/.claude-profile`, `~/.claude-profiles`, `.claude-profile` and
+`CLAUDE_PROFILE*` names stay unchanged so upgrading does not move data or break
+project pins.
+
 On Windows, npm's postinstall cannot yet run the unmigrated `install.ps1` and
 prints a message telling you to clone the repo and run it yourself instead.
-See [Windows](#windows).
+See [Windows](#windows). Codex switching is currently available through the
+POSIX installer only; PowerShell still switches Claude alone.
 
 `install.sh` adds the `source` line to your `~/.zshrc`, `~/.bashrc` or
 `~/.bash_profile` — whichever your shell actually reads, which differs between
@@ -71,51 +79,56 @@ clone](#moving-off-an-old-clone) below for what else that involves.
 Start a new shell, then snapshot your current setup:
 
 ```sh
-claude-profile --create development
-claude-profile development
+agent-profile --create development
+agent-profile development
 ```
 
-`claude` now runs with that profile. `claude-profile default` goes back to
-plain `~/.claude`.
+`claude` and Codex now use that profile. `agent-profile default` goes back to
+plain `~/.claude` and the original Codex config.
+
+The first switch preserves the existing `~/.codex/config.toml` as
+`~/.claude-profiles/codex-default.config.toml`. Existing profiles get a copy of
+that default the first time they are selected. Restart an open Codex session
+after switching; running sessions keep the settings they started with.
 
 ### The two commands
 
-`claude-profile` manages profiles — everything under
+`agent-profile` manages profiles — everything under
 [Commands](#commands) below. `claude` is Claude Code itself, with a wrapper in
 front that points `CLAUDE_CONFIG_DIR` at whichever profile is active. One to
 choose, one to work.
 
-Management has a single name and a single spelling. Launching is the half that
-has to work everywhere, and how far the wrapper reaches depends on where you are:
+Launching is the half that has to work everywhere, and how far the wrapper
+reaches depends on where you are:
 
-| context | `claude-profile` | `claude` follows the active profile |
+| context | `agent-profile` | `claude` follows the active profile |
 |---|---|---|
 | interactive zsh or bash | yes, function and symlink on PATH | yes, shell function |
 | `zsh -c`, zsh scripts, Claude Code's own Bash tool | yes, symlink on PATH | yes, via the `.zshenv` shim |
 | `bash -c` | yes, symlink on PATH | no — would need `BASH_ENV`, out of scope |
 | `sh -c`, cron, GUI-launched apps | yes, symlink on PATH | no |
 
-`claude-profile` is reachable two ways on purpose: sourcing your rc defines it as
+`agent-profile` is reachable two ways on purpose: sourcing your rc defines it as
 a shell function, and `install.sh` also symlinks it into `~/.local/bin`. Either
 would do in most setups — both, because `~/.local/bin` is absent from the default
 PATH on macOS, and a login shell does not always read the file the source line
 went into. Where the `claude` wrapper does not reach, a session still gets the
-right config through `claude-profile <name> -- <args>`.
+right config through `agent-profile <name> -- <args>`.
 
 Pass `--no-shim` to skip installing the standalone `claude` wrapper if you only
-want `claude-profile`; you still get the `claude` shell function in an interactive
+want `agent-profile`; you still get the `claude` shell function in an interactive
 shell either way, since that comes from sourcing your rc, not from the shim.
 
 ### Moving off an old clone
 
 Profiles used to live inside the clone itself, at
-`~/claude-profiles/profiles/`. They now default to `~/.claude-profiles`
+`~/agent-profiles/profiles/`. They now default to `~/.claude-profiles`
 (plural, outside any clone — see [Where the data
 lives](#where-the-data-lives)), so moving to this version needs a one-time
 migration:
 
 ```sh
-claude-profile --migrate-store ~/claude-profiles
+agent-profile --migrate-store ~/agent-profiles
 ```
 
 This moves `profiles/`, `active`, `exports/`, `.backups/` and
@@ -139,11 +152,11 @@ already moved.
 
 ### Without installing
 
-`claude-profile` is a command this repo adds, not something Claude Code ships.
+`agent-profile` is a command this repo adds, not something Claude Code ships.
 Skip the install and there is nothing to run:
 
 ```
-claude-profile: command not found
+agent-profile: command not found
 ```
 
 Running the script directly needs no install at all:
@@ -164,7 +177,7 @@ function already in your shell can change that. Start sessions with
 The wrapper is a POSIX shell function and exists only inside the shell that
 sourced it, so `install.sh` covers Git Bash and nothing else. PowerShell needs
 its own install, which defines the same two commands natively — `claude` as a
-function, `claude-profile` as an alias:
+function, `agent-profile` as an alias:
 
 ```powershell
 .\install.ps1
@@ -175,10 +188,10 @@ to share one store, so that a profile created in either is visible in both —
 but that is **not currently true**. Only the Git Bash / `install.sh` half
 defaults to `~/.claude-profiles`; `install.ps1`'s store still defaults to its
 own module directory. Left on defaults, the two halves read two different
-stores and `claude-profile` lists different profiles depending on which one
+stores and `agent-profile` lists different profiles depending on which one
 you're in. Until the PowerShell half is migrated too, set
 `CLAUDE_PROFILES_DIR` explicitly, to the same path, for both — and install
-from a git clone with `install.ps1`; `npm i -g claude-profiles` on Windows
+from a git clone with `install.ps1`; `npm i -g agent-profiles` on Windows
 does not run it (see [Install](#install)).
 
 `install.ps1` edits `$PROFILE`, checks that a fresh PowerShell really does end
@@ -187,11 +200,11 @@ up with both commands defined, and warns if your execution policy is
 and the wrapper is never defined. It will not change the policy for you; the fix
 is `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-`claude-profile` is an alias rather than a function because PowerShell reads any
+`agent-profile` is an alias rather than a function because PowerShell reads any
 hyphenated name as `Verb-Noun` and warns on import when the verb is not one of its
 approved ones — which "claude" will never be. Aliases are not verb-checked, so
 this is the spelling that does not print a warning every time you open a shell.
-`Get-Command claude-profile` reports it as an `Alias` for `Invoke-CpProfile`;
+`Get-Command agent-profile` reports it as an `Alias` for `Invoke-CpProfile`;
 both names work.
 
 Only two things are reimplemented in PowerShell: working out which profile is
@@ -207,7 +220,7 @@ One syntax difference, forced by the PowerShell parser: it treats a bare `--` as
 end-of-parameters and eats it before the function is called, so
 
 ```powershell
-claude-profile finance -- --version
+agent-profile finance -- --version
 ```
 
 arrives as `finance --version`, with the separator already gone. It works
@@ -227,22 +240,22 @@ See [Uninstall](#uninstall) for removing either half.
 
 | Command | Does |
 |---|---|
-| `claude-profile` | Active profile, why it was selected, and the full list |
-| `claude-profile <name>` | Set the active profile |
-| `claude-profile default` | Clear it; back to plain `~/.claude` |
-| `claude-profile <name> -- <args>` | One session in `<name>`; active unchanged |
-| `claude-profile --create <name>` | Snapshot the current setup |
-| `claude-profile --update <name>` | Mirror the current setup into `<name>` |
-| `claude-profile --reset [name]` | Wipe `<name>` (default: active) back to a first-run config; old contents moved to `.backups/`. Shared paths stay linked, so you stay logged in |
-| `claude-profile --delete <name>` | Delete (moved to `.backups/`) |
-| `claude-profile --rename <a> <b>` | Rename |
-| `claude-profile --copy <a> <b>` | Duplicate |
-| `claude-profile --show [name]` | Path, model, plugins, skills, hooks, MCP servers. No name: the profile you're in right now |
-| `claude-profile --diff <a> <b>` | The same, side by side |
-| `claude-profile --path [name]` | Print where that profile's config directory is, and nothing else |
-| `claude-profile --open [name]` | Open that directory in Explorer / Finder / your file manager |
-| `claude-profile --export <name> [file]` | Shareable tarball into `exports/` (override with `file`), excludes `.credentials.json` (see Security notes) |
-| `claude-profile --import <file> [name]` | Create a profile from a tarball |
+| `agent-profile` | Active profile, why it was selected, and the full list |
+| `agent-profile <name>` | Set the active profile |
+| `agent-profile default` | Clear it; back to plain `~/.claude` |
+| `agent-profile <name> -- <args>` | One session in `<name>`; active unchanged |
+| `agent-profile --create <name>` | Snapshot the current Claude and Codex setup |
+| `agent-profile --update <name>` | Mirror the current Claude and Codex setup into `<name>` |
+| `agent-profile --reset [name]` | Wipe `<name>` (default: active) back to a first-run config; old contents moved to `.backups/`. Shared paths stay linked, so you stay logged in |
+| `agent-profile --delete <name>` | Delete (moved to `.backups/`) |
+| `agent-profile --rename <a> <b>` | Rename |
+| `agent-profile --copy <a> <b>` | Duplicate |
+| `agent-profile --show [name]` | Path, model, plugins, skills, hooks, MCP servers. No name: the profile you're in right now |
+| `agent-profile --diff <a> <b>` | The same, side by side |
+| `agent-profile --path [name]` | Print where that profile's config directory is, and nothing else |
+| `agent-profile --open [name]` | Open that directory in Explorer / Finder / your file manager |
+| `agent-profile --export <name> [file]` | Shareable tarball into `exports/` (override with `file`), excludes `.credentials.json` (see Security notes) |
+| `agent-profile --import <file> [name]` | Create a profile from a tarball |
 
 ## Which profile am I in?
 
@@ -251,14 +264,18 @@ Most specific wins:
 1. `CLAUDE_PROFILE=finance claude` — one invocation
 2. A `.claude-profile` file containing a profile name, found walking up from
    the current directory
-3. The active profile (`claude-profile <name>`)
+3. The active profile (`agent-profile <name>`)
 4. `~/.claude`
 
-`claude-profile` tells you which of these fired. `claude-profile --show` answers
+The environment variable and project pin are Claude-only session overrides.
+Codex follows the globally active profile because its desktop app cannot read a
+shell-local override.
+
+`agent-profile` tells you which of these fired. `agent-profile --show` answers
 the same question and then describes what you'd actually be running with:
 
 ```
-$ claude-profile --show
+$ agent-profile --show
 dev  (active)
   path     /home/you/.claude-profiles/profiles/dev
   model    opus-5
@@ -274,10 +291,10 @@ Under `<store>/profiles/<name>`, where the store is `~/.claude-profiles` unless
 `$CLAUDE_PROFILES_DIR` says otherwise. Two commands save you working that out:
 
 ```sh
-claude-profile --path            # the directory you're using right now
-claude-profile --path finance    # a specific profile's
-claude-profile --open finance    # the same, in your file manager
-cd "$(claude-profile --path)"    # --path prints the path alone, for this
+agent-profile --path            # the directory you're using right now
+agent-profile --path finance    # a specific profile's
+agent-profile --open finance    # the same, in your file manager
+cd "$(agent-profile --path)"    # --path prints the path alone, for this
 ```
 
 On Windows these print `C:\...` from PowerShell and `/c/...` from Git Bash —
@@ -289,8 +306,8 @@ Per-profile (copied): everything not on the shared list below — `settings.json
 `CLAUDE.md`, `skills/`, `commands/`, `hooks/`, `agents/`, `scripts/`,
 `statusline.sh`, `.claude.json`, and anything else sitting in `~/.claude`
 (`.caveman-active`, `teams/`, `agentic-os/`, whatever a future Claude Code
-version adds). It's copy-the-rest, not an allowlist, so nothing here needs
-updating when Claude Code grows a new config file.
+version adds), plus `codex.config.toml`. It's copy-the-rest, not an allowlist, so
+nothing here needs updating when Claude Code grows a new config file.
 
 Shared across all profiles (symlinked back to `~/.claude`): `plugins/` (the
 download cache — install once, enable per profile in `settings.json`),
@@ -299,16 +316,17 @@ and the runtime directories.
 
 ## Where the data lives
 
-Profiles live in `~/.claude-profiles` by default — outside any clone, so a
-clone can be deleted or moved without losing them. `profiles/` holds the
-profiles themselves, `active` the active profile name, `.backups/` the
-pre-update snapshots. Set `CLAUDE_PROFILES_DIR` to put the store somewhere
-else instead. If you point it at a git-tracked directory anyway — including
-this clone's own, pre-migration — `profiles/`, `active`, `.backups/`,
-`exports/` and `prompt-state.json` are all in this repo's `.gitignore`, so a
-profile's `settings.json` and any API keys in it were never at risk of being
-committed. Upgrading from a version that kept `profiles/` inside the clone?
-See [Moving off an old clone](#moving-off-an-old-clone).
+Profiles and the preserved default Codex config live in `~/.claude-profiles`
+by default — outside any clone, so a clone can be deleted or moved without
+losing them. `profiles/` holds the profiles themselves, `active` the active
+profile name, `.backups/` the pre-update snapshots. Set `CLAUDE_PROFILES_DIR`
+to put the store somewhere else instead. If you point it at a git-tracked
+directory anyway — including this clone's own, pre-migration — `profiles/`,
+`active`, `.backups/`, `exports/`, `prompt-state.json` and
+`codex-default.config.toml` are all in this repo's `.gitignore`, so a profile's
+`settings.json` and any API keys in it were never at risk of being committed.
+Upgrading from a version that kept `profiles/` inside the clone? See
+[Moving off an old clone](#moving-off-an-old-clone).
 
 `.backups/` has no retention policy — nothing prunes it automatically. On a
 long-lived install it grows without bound; clear old entries by hand if that
@@ -317,11 +335,11 @@ becomes a problem.
 ## Security notes
 
 **`--export` can leak secrets that aren't credentials.** The tarball
-structurally excludes `.credentials.json`, but `settings.json` is included,
-and anything you've put in its `env` block or baked into a hook command
-travels with the archive. The tool warns when it sees a top-level `env` key
-and prints the manifest of what's inside — read that manifest before you send
-the file to anyone. **The warning itself needs Python**: without it the
+structurally excludes `.credentials.json`, but `settings.json` and
+`codex.config.toml` are included. Anything you've put in an environment block,
+MCP config or hook command travels with the archive. The tool warns when it
+sees a top-level `env` key and prints the manifest of what's inside — read that
+manifest before you send the file to anyone. **The warning itself needs Python**: without it the
 check silently fails and no warning is printed, so on a machine with no
 `python3`, `python` or `py` you must read the manifest yourself instead of
 trusting the absence of a warning.
@@ -333,7 +351,7 @@ not been verified against older GNU tar builds.
 **Import rewrites any `/profiles/` path segment it finds in `settings.json`**,
 not just the exporter's own store path — if a hook or `env` value legitimately
 points somewhere containing a literal `/profiles/` directory unrelated to
-claude-profile, that path gets rewritten too.
+agent-profile, that path gets rewritten too.
 
 ## Recovering from a bad `--update` or `--delete`
 
@@ -341,7 +359,7 @@ There is no `--restore` command. Both commands move the profile's previous
 contents to `.backups/<name>-<timestamp>/` before writing, so recovery is a
 manual copy:
 
-`claude-profile` prints a `store: <path>` line — that's the directory below.
+`agent-profile` prints a `store: <path>` line — that's the directory below.
 Substitute it for `<store>`:
 
 ```sh
@@ -380,10 +398,10 @@ silently miss every profile that already exists.)
 ## Uninstall
 
 Run `./install.sh --uninstall` from the clone. It removes the rc source line, the
-`.zshenv` PATH block, the `claude-profile` symlink, and the install directory
+`.zshenv` PATH block, the `agent-profile` symlink, and the install directory
 (`~/.claude-profile` by default), and prints where your profile store still
 lives — nothing under it is touched. Installed via npm? Use
-`claude-profile-install --uninstall` instead — it runs the same `install.sh`,
+`agent-profile-install --uninstall` instead — it runs the same `install.sh`,
 kept inside the npm package after a git clone would be gone.
 
 There's no equivalent on the PowerShell side yet: remove the `Import-Module`
@@ -421,7 +439,7 @@ powershell -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
 Tests run against a temporary store and a temporary fake home. They never read
-or write your real `~/.claude`.
+or write your real `~/.claude` or `~/.codex`.
 
 `test.ps1` ends with a drift guard. Profile resolution is the one piece of logic
 that exists twice — `lib/resolve.sh` and `claude-profile.psm1` — so rather than

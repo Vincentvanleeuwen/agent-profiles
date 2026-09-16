@@ -53,7 +53,7 @@ Usage: ./install.sh [options]
   --uninstall        reverse the install; your profile store is left alone
   -h, --help         this
 
-With no options it copies the code to $INSTALL_DIR, links claude-profile onto
+With no options it copies the code to $INSTALL_DIR, links agent-profile onto
 PATH, adds the source line to your shell rc, and checks that a fresh shell
 picks it up.
 EOF
@@ -258,9 +258,24 @@ drop_zshenv_block() {
     mv "$_t" "$_f" || { rm -f "$_t"; die "could not rewrite $_f"; }
 }
 
+restore_codex_config() {
+    _store=${CLAUDE_PROFILES_DIR:-$HOME/.claude-profiles}
+    _config="$HOME/.codex/config.toml"
+    _default="$_store/codex-default.config.toml"
+    case "$(readlink "$_config" 2>/dev/null)" in
+        "$_store"/profiles/*/codex.config.toml|"$_default")
+            [ -f "$_default" ] || return 0
+            _tmp="$_config.tmp.$$"
+            cp -L "$_default" "$_tmp" || { rm -f "$_tmp"; die "could not restore $_config"; }
+            mv -f "$_tmp" "$_config" || { rm -f "$_tmp"; die "could not restore $_config"; }
+            ;;
+    esac
+}
+
 # rm -rf "$INSTALL_DIR" needs no extra guard: the canonicalising check at the
 # top of this file already refused /, $HOME and its ancestors before any flag ran.
 if [ -n "$uninstall" ]; then
+    restore_codex_config
     drop_lines "$rc" '^[[:space:]]*(\.|source)[[:space:]].*claude-profile\.sh'
     drop_lines "$rc" '^# claude-profile — added by install.sh$'
     drop_zshenv_block "$ZSHENV"
@@ -269,6 +284,10 @@ if [ -n "$uninstall" ]; then
     case "$(readlink "$LINK_DIR/claude-profile" 2>/dev/null)" in
         "$BIN_DIR"/*) rm -f "$LINK_DIR/claude-profile" ;;
         *) [ -e "$LINK_DIR/claude-profile" ] && say "left $LINK_DIR/claude-profile alone: not ours" ;;
+    esac
+    case "$(readlink "$LINK_DIR/agent-profile" 2>/dev/null)" in
+        "$BIN_DIR"/*) rm -f "$LINK_DIR/agent-profile" ;;
+        *) [ -e "$LINK_DIR/agent-profile" ] && say "left $LINK_DIR/agent-profile alone: not ours" ;;
     esac
     rm -rf "$INSTALL_DIR"
     say "removed $INSTALL_DIR, the PATH line and the rc line"
@@ -295,6 +314,7 @@ copy_code() {
     # Stays a symlink, not a wrapper: link_bin points ~/.local/bin/claude-profile here,
     # so a dirname "$0" wrapper would resolve its sibling against the wrong directory.
     [ -e "$BIN_DIR/claude-profile" ] || ln -s ../claude-profile.sh "$BIN_DIR/claude-profile"
+    [ -e "$BIN_DIR/agent-profile" ] || ln -s ../claude-profile.sh "$BIN_DIR/agent-profile"
     [ -n "$no_shim" ] && rm -f "$BIN_DIR/claude"
     say "installed the code to $INSTALL_DIR"
 }
@@ -313,8 +333,11 @@ migrate_clone_store() {
 
 link_bin() {
     mkdir -p "$LINK_DIR" || die "the code is installed to $INSTALL_DIR, but could not create $LINK_DIR"
+    ln -sf "$BIN_DIR/agent-profile" "$LINK_DIR/agent-profile" \
+        || die "the code is installed to $INSTALL_DIR, but could not link $LINK_DIR/agent-profile"
     ln -sf "$BIN_DIR/claude-profile" "$LINK_DIR/claude-profile" \
         || die "the code is installed to $INSTALL_DIR, but could not link $LINK_DIR/claude-profile"
+    say "linked $LINK_DIR/agent-profile"
     say "linked $LINK_DIR/claude-profile"
 }
 
@@ -419,11 +442,11 @@ case $(command -v claude) in
     claude) ;;
     *) exit 1 ;;
 esac
-[ -n "$(command -v claude-profile)" ] || exit 1' _ "$rc" >/dev/null 2>&1; then
-        say "verified: sourcing $rc defines claude and claude-profile"
+[ -n "$(command -v agent-profile)" ] || exit 1' _ "$rc" >/dev/null 2>&1; then
+        say "verified: sourcing $rc defines claude and agent-profile"
         say "note: --rc given, so whether a shell reads that file was not checked"
     else
-        die "wrote $rc, but sourcing it does not define claude and claude-profile.
+        die "wrote $rc, but sourcing it does not define claude and agent-profile.
      Run '. \"$TARGET\"' by hand to see the error."
     fi
 else
@@ -450,25 +473,25 @@ else
      claude wrapper. Run '. \"$TARGET\"' by hand to see the error." ;;
     esac
 
-    # The other half. claude-profile has two ways to exist — the function the
+    # The other half. agent-profile has two ways to exist — the function the
     # source line defines, and the symlink link_bin put in $LINK_DIR — and either
     # one is a working install, so this insists on one of them rather than on
     # which. It does insist, though: ~/.local/bin is absent from the default PATH
     # on macOS, so the symlink on its own is not something to take on trust.
-    seen_cp=$("$verify_bin" -i -c 'command -v claude-profile' 2>/dev/null)
+    seen_cp=$("$verify_bin" -i -c 'command -v agent-profile' 2>/dev/null)
     case "$seen_cp" in
         "")
-            die "wrote $rc, but a new interactive $want_shell has no claude-profile
-     command — neither the function nor $LINK_DIR/claude-profile on PATH.
+            die "wrote $rc, but a new interactive $want_shell has no agent-profile
+     command — neither the function nor $LINK_DIR/agent-profile on PATH.
      Run '. \"$TARGET\"' by hand to see the error." ;;
         alias*)
-            die "an alias in $rc shadows claude-profile:
+            die "an alias in $rc shadows agent-profile:
 
          $seen_cp
 
      Alias expansion happens before function lookup, so the alias always
      wins. Remove it, then run this again." ;;
-        *) say "verified: claude-profile resolves to $seen_cp" ;;
+        *) say "verified: agent-profile resolves to $seen_cp" ;;
     esac
 
     # Login shells read a different file, and that difference is the whole bug
@@ -489,7 +512,7 @@ if [ -n "$from_npm" ]; then
     say ""
     say "If you are moving off a git clone, move its store too:"
     say ""
-    say "    claude-profile --migrate-store <path-to-old-clone>"
+    say "    agent-profile --migrate-store <path-to-old-clone>"
 fi
 
 say ""
@@ -499,8 +522,8 @@ say "    $LINE"
 say ""
 say "Then:"
 say ""
-say "    claude-profile --create development"
-say "    claude-profile development"
+say "    agent-profile --create development"
+say "    agent-profile development"
 
 # Git Bash only shadows `claude` inside Git Bash. PowerShell and cmd run
 # claude.exe directly and never see a POSIX shell function, so silently getting
@@ -515,7 +538,7 @@ case "$(uname -s 2>/dev/null)" in
         say "    powershell -File \"$SELF_DIR/install.ps1\""
         say ""
         say "Both share one store. cmd.exe cannot be supported at all — from there,"
-        say "use 'claude-profile <name> -- <args>' from this shell instead."
+        say "use 'agent-profile <name> -- <args>' from this shell instead."
         ;;
 esac
 

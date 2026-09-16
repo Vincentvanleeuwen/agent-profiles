@@ -328,6 +328,7 @@ function Invoke-CpProfile {
 }
 
 Set-Alias -Name claude-profile -Value Invoke-CpProfile
+Set-Alias -Name agent-profile -Value Invoke-CpProfile
 
 # The whole reason the import line is worth having: a `claude` that follows the
 # active profile rather than always reading ~/.claude. Management lives in
@@ -341,4 +342,4 @@ function claude {
 # Invoke-CpProfile is exported alongside its alias deliberately. An exported
 # alias whose target is not itself exported is resolvable only from inside the
 # module's session state, which is not where anyone types.
-Export-ModuleMember -Function claude, Invoke-CpProfile -Alias claude-profile
+Export-ModuleMember -Function claude, Invoke-CpProfile -Alias agent-profile, claude-profile

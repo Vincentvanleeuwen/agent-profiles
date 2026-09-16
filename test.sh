@@ -28,7 +28,8 @@ mkdir -p "$HERE/profiles"
 # Fake base config dir, shaped like a real ~/.claude
 FAKEHOME="$TMP/home"
 mkdir -p "$FAKEHOME/.claude/hooks" "$FAKEHOME/.claude/skills/demo" \
-         "$FAKEHOME/.claude/plugins/cache" "$FAKEHOME/.claude/projects"
+         "$FAKEHOME/.claude/plugins/cache" "$FAKEHOME/.claude/projects" \
+         "$FAKEHOME/.codex"
 printf 'echo hook\n' > "$FAKEHOME/.claude/hooks/demo.sh"
 printf 'name: demo\n'  > "$FAKEHOME/.claude/skills/demo/SKILL.md"
 printf 'base instructions\n' > "$FAKEHOME/.claude/CLAUDE.md"
@@ -51,6 +52,7 @@ cat > "$FAKEHOME/.claude/settings.json" <<JSON
 }
 JSON
 printf 'printf hud\n' > "$FAKEHOME/.claude/statusline.sh"
+printf 'model = "base"\n' > "$FAKEHOME/.codex/config.toml"
 cat > "$FAKEHOME/.claude/.claude.json" <<JSON
 { "mcpServers": { "figma": {}, "atlassian": {} } }
 JSON
@@ -153,6 +155,8 @@ mkdir -p "$TMP/store/profiles"
 _cp_main --create dev >/dev/null
 check "create makes profile dir"  '[ -d "$TMP/store/profiles/dev" ]'
 check "create built settings"     '[ -f "$TMP/store/profiles/dev/settings.json" ]'
+check "create snapshots Codex config" \
+      'grep -q base "$TMP/store/profiles/dev/codex.config.toml"'
 check "create is not active yet"  '[ ! -f "$TMP/store/active" ]'
 
 _cp_main --create dev >/dev/null 2>&1
@@ -161,15 +165,45 @@ eq "create refuses duplicate" "$?" "1"
 _cp_main dev >/dev/null
 eq "set writes active"   "$(cat "$TMP/store/active")" "dev"
 eq "resolve follows it"  "$(_cp_resolve)" "$TMP/store/profiles/dev"
+check "set links Codex config to profile" '[ -L "$FAKEHOME/.codex/config.toml" ]'
+eq "Codex link targets active profile" "$(readlink "$FAKEHOME/.codex/config.toml")" \
+   "$TMP/store/profiles/dev/codex.config.toml"
+check "set preserves default Codex config" \
+      'grep -q base "$TMP/store/codex-default.config.toml"'
+printf 'model = "dev"\n' > "$FAKEHOME/.codex/config.toml"
 
 # Creating while a profile is active forks from that profile.
 printf 'dev only\n' > "$TMP/store/profiles/dev/MARKER.md"
 _cp_main --create fin >/dev/null
 check "create forks from active" '[ -f "$TMP/store/profiles/fin/MARKER.md" ]'
+check "create forks the active Codex config" \
+      'grep -q dev "$TMP/store/profiles/fin/codex.config.toml"'
 
 _cp_main default >/dev/null
 check "default clears active" '[ ! -f "$TMP/store/active" ]'
 eq    "default falls back"    "$(_cp_resolve)" "$FAKEHOME/.claude"
+eq "default restores Codex config" "$(readlink "$FAKEHOME/.codex/config.toml")" \
+   "$TMP/store/codex-default.config.toml"
+check "profile keeps Codex changes" \
+      'grep -q dev "$TMP/store/profiles/dev/codex.config.toml"'
+
+rm -f "$TMP/store/profiles/fin/codex.config.toml"
+_cp_main fin >/dev/null
+check "legacy profile receives default Codex config" \
+      'grep -q base "$TMP/store/profiles/fin/codex.config.toml"'
+_cp_main default >/dev/null
+
+ATOM_HOME="$TMP/atom-home"
+ATOM_STORE="$TMP/atom-store"
+mkdir -p "$ATOM_HOME/.codex" "$ATOM_STORE"
+printf 'complete\n' > "$ATOM_HOME/.codex/config.toml"
+# shellcheck disable=SC2030,SC2031
+(HOME="$ATOM_HOME"; CLAUDE_PROFILES_DIR="$ATOM_STORE"; export HOME CLAUDE_PROFILES_DIR
+ cp() { printf 'partial\n' > "$2"; return 1; }
+ _cp_codex_prepare_default)
+eq "failed default snapshot exits non-zero" "$?" "1"
+check "failed default snapshot leaves no partial config" \
+      '[ ! -e "$ATOM_STORE/codex-default.config.toml" ]'
 
 # --reset wipes the profile's own config but keeps it existing, active, and
 # linked to base. It is no longer an alias for "default".
@@ -182,6 +216,9 @@ check "--reset does not clear active"  '[ "$(cat "$TMP/store/active")" = wipeme 
 check "--reset drops owned config"     '[ ! -e "$TMP/store/profiles/wipeme/CLAUDE.md" ]'
 check "--reset drops settings.json"    '[ ! -e "$TMP/store/profiles/wipeme/settings.json" ]'
 eq    "--reset relinks shared"         "$(readlink "$TMP/store/profiles/wipeme/plugins")" "$FAKEHOME/.claude/plugins"
+check "--reset restores default Codex config" \
+      'grep -q base "$TMP/store/profiles/wipeme/codex.config.toml"'
+check "--reset keeps the Codex link valid" '[ -f "$FAKEHOME/.codex/config.toml" ]'
 check "--reset backed up old copy"     'ls "$TMP/store/.backups" | grep -q "^wipeme-"'
 _CP_YES=1 _cp_main --reset nope >/dev/null 2>&1
 eq "--reset refuses unknown profile" "$?" "1"
@@ -240,6 +277,8 @@ else
     _cp_main dev >/dev/null 2>&1
     eq "set fails loudly on unwritable store" "$?" "1"
     check "set wrote nothing" '[ ! -f "$TMP/store/active" ]'
+    eq "failed set restores default Codex config" \
+       "$(readlink "$FAKEHOME/.codex/config.toml")" "$TMP/store/codex-default.config.toml"
     chmod 755 "$TMP/store"
 
     _cp_main dev >/dev/null
@@ -247,7 +286,17 @@ else
     _cp_main default >/dev/null 2>&1
     eq "default fails loudly on unwritable store" "$?" "1"
     eq "default left previous active intact" "$(cat "$TMP/store/active")" "dev"
+    eq "failed default keeps the active Codex config" \
+       "$(readlink "$FAKEHOME/.codex/config.toml")" "$TMP/store/profiles/dev/codex.config.toml"
     chmod 755 "$TMP/store"
+
+    _cp_main fin >/dev/null
+    chmod 444 "$TMP/store/active"
+    _cp_main dev >/dev/null 2>&1
+    eq "failed switch leaves previous active marker" "$(cat "$TMP/store/active")" "fin"
+    eq "failed switch restores previous Codex config" \
+       "$(readlink "$FAKEHOME/.codex/config.toml")" "$TMP/store/profiles/fin/codex.config.toml"
+    chmod 644 "$TMP/store/active"
 
     # A failed backup must abort before _cp_build ever touches the profile —
     # the backup is the only rollback this tool has, so a false "backed up"
@@ -281,6 +330,7 @@ else
     rm -rf "$TMP/store/.backups"/fin-*
 
     mkdir -p "$TMP/rwtest"
+    # shellcheck disable=SC2031
     printf '{"a":"%s/.claude/x"}' "$HOME" > "$TMP/rwtest/settings.json"
     chmod 555 "$TMP/rwtest"
     _cp_rewrite "$TMP/rwtest/settings.json" "$TMP/store/profiles/dev" 2>/dev/null
@@ -311,6 +361,8 @@ rm -f "$TMP/store/profiles/fin/CLAUDE.md"
 
 _cp_main --update fin >/dev/null
 check "update restored file from source" '[ -f "$TMP/store/profiles/fin/CLAUDE.md" ]'
+check "update snapshots the current Codex config" \
+      'grep -q base "$TMP/store/profiles/fin/codex.config.toml"'
 check "update removed profile-only file" '[ ! -f "$TMP/store/profiles/fin/LOCAL.md" ]'
 check "update made a backup"             'ls -d "$TMP/store/.backups/fin-"* >/dev/null 2>&1'
 check "backup kept the removed file"     'cat "$TMP/store/.backups/fin-"*/LOCAL.md >/dev/null 2>&1'
@@ -324,9 +376,19 @@ _cp_main fin >/dev/null
 _cp_main --update fin >/dev/null 2>&1
 eq "update refuses self as source" "$?" "1"
 check "self-update left profile intact" '[ -f "$TMP/store/profiles/fin/settings.json" ]'
+_cp_main dev >/dev/null
+(CLAUDE_PROFILE=fin; export CLAUDE_PROFILE; _cp_main --update dev >/dev/null 2>&1)
+eq "update refuses the globally active profile under an override" "$?" "1"
+check "override refusal keeps active Codex config valid" '[ -f "$FAKEHOME/.codex/config.toml" ]'
 _cp_main default >/dev/null
 
 echo "== Task 6: delete, rename, copy =="
+
+mkdir -p "$TMP/store/profiles/legacycopy"
+printf '{}\n' > "$TMP/store/profiles/legacycopy/settings.json"
+_cp_main --copy legacycopy legacycopied >/dev/null
+check "copy seeds legacy Codex config" \
+      '[ -f "$TMP/store/profiles/legacycopied/codex.config.toml" ]'
 
 _cp_main --create tmp1 >/dev/null
 _CP_YES=1 _cp_main --delete tmp1 >/dev/null
@@ -344,6 +406,27 @@ eq "delete refuses active profile" "$?" "1"
 unset _CP_YES
 check "active profile survived"    '[ -d "$TMP/store/profiles/tmp2" ]'
 _cp_main default >/dev/null
+
+_cp_main --create pindelete >/dev/null
+_cp_main pindelete >/dev/null
+(CLAUDE_PROFILE=dev; export CLAUDE_PROFILE; _CP_YES=1 _cp_main --delete pindelete >/dev/null)
+check "delete clears an overridden active profile" '[ ! -f "$TMP/store/active" ]'
+eq "delete restores Codex default for cleared active profile" \
+   "$(readlink "$FAKEHOME/.codex/config.toml")" "$TMP/store/codex-default.config.toml"
+
+_cp_main --create deletefail >/dev/null
+_cp_main deletefail >/dev/null
+chmod 555 "$TMP/store"
+(CLAUDE_PROFILE=dev; export CLAUDE_PROFILE; _CP_YES=1 _cp_main --delete deletefail >/dev/null 2>&1)
+eq "delete fails when the active marker cannot be cleared" "$?" "1"
+chmod 755 "$TMP/store"
+check "failed delete restores the profile" '[ -d "$TMP/store/profiles/deletefail" ]'
+eq "failed delete keeps the active marker" "$(cat "$TMP/store/active")" "deletefail"
+eq "failed delete keeps the active Codex config" \
+   "$(readlink "$FAKEHOME/.codex/config.toml")" "$TMP/store/profiles/deletefail/codex.config.toml"
+_cp_main default >/dev/null
+_CP_YES=1 _cp_main --delete deletefail >/dev/null
+unset _CP_YES
 
 printf 'no\n' | _cp_main --delete tmp2 >/dev/null 2>&1
 check "delete without confirmation keeps profile" '[ -d "$TMP/store/profiles/tmp2" ]'
@@ -364,11 +447,53 @@ check "copy fixed paths"     'grep -q "$TMP/store/profiles/tmp4/hooks/demo.sh" "
 check "copy kept symlinks"   '[ -L "$TMP/store/profiles/tmp4/plugins" ]'
 eq    "copy symlink to base" "$(readlink "$TMP/store/profiles/tmp4/plugins")" "$FAKEHOME/.claude/plugins"
 
+_cp_main --create moveactive >/dev/null
+_cp_main moveactive >/dev/null
+_cp_main --rename moveactive movedactive >/dev/null
+eq "rename updates active profile" "$(cat "$TMP/store/active")" "movedactive"
+eq "rename retargets Codex config" "$(readlink "$FAKEHOME/.codex/config.toml")" \
+   "$TMP/store/profiles/movedactive/codex.config.toml"
+_cp_main default >/dev/null
+_CP_YES=1 _cp_main --delete movedactive >/dev/null
+unset _CP_YES
+
+_cp_main --create rewritefail >/dev/null
+_cp_main rewritefail >/dev/null
+chmod 555 "$TMP/store/profiles/rewritefail"
+_cp_main --rename rewritefail rewrittenfail >/dev/null 2>&1
+eq "rename fails when active profile paths cannot be rewritten" "$?" "1"
+chmod 755 "$TMP/store/profiles/rewritefail"
+check "failed rewrite restores the old profile" \
+      '[ -d "$TMP/store/profiles/rewritefail" ] && [ ! -e "$TMP/store/profiles/rewrittenfail" ]'
+eq "failed rewrite keeps the active marker" "$(cat "$TMP/store/active")" "rewritefail"
+eq "failed rewrite keeps the active Codex config" \
+   "$(readlink "$FAKEHOME/.codex/config.toml")" "$TMP/store/profiles/rewritefail/codex.config.toml"
+_cp_main default >/dev/null
+_CP_YES=1 _cp_main --delete rewritefail >/dev/null
+unset _CP_YES
+
+_cp_main --create renamefail >/dev/null
+_cp_main renamefail >/dev/null
+chmod 444 "$TMP/store/active"
+_cp_main --rename renamefail renamedfail >/dev/null 2>&1
+eq "rename fails when the active marker cannot be changed" "$?" "1"
+chmod 644 "$TMP/store/active"
+check "failed rename restores the old profile" \
+      '[ -d "$TMP/store/profiles/renamefail" ] && [ ! -e "$TMP/store/profiles/renamedfail" ]'
+eq "failed rename keeps the active marker" "$(cat "$TMP/store/active")" "renamefail"
+eq "failed rename keeps the active Codex config" \
+   "$(readlink "$FAKEHOME/.codex/config.toml")" "$TMP/store/profiles/renamefail/codex.config.toml"
+_cp_main default >/dev/null
+_CP_YES=1 _cp_main --delete renamefail >/dev/null
+unset _CP_YES
+
 _cp_main --copy tmp3 tmp4 >/dev/null 2>&1
 eq "copy refuses existing target" "$?" "1"
 
 _CP_YES=1 _cp_main --delete tmp3 >/dev/null
 _CP_YES=1 _cp_main --delete tmp4 >/dev/null
+_CP_YES=1 _cp_main --delete legacycopy >/dev/null
+_CP_YES=1 _cp_main --delete legacycopied >/dev/null
 unset _CP_YES
 
 echo "== Task 7: show and diff =="
@@ -466,9 +591,23 @@ _cp_main default >/dev/null
 
 echo "== Task 8: export and import =="
 
+mkdir -p "$TMP/store/profiles/legacyexport"
+printf '{}\n' > "$TMP/store/profiles/legacyexport/settings.json"
+_cp_main --export legacyexport "$TMP/legacyexport.tar.gz" >/dev/null 2>&1
+check "export seeds legacy Codex config" \
+      'tar tzf "$TMP/legacyexport.tar.gz" | grep -q "codex.config.toml"'
+
+mkdir -p "$TMP/legacyarchive"
+printf '{}\n' > "$TMP/legacyarchive/settings.json"
+(cd "$TMP/legacyarchive" && tar czf "$TMP/legacyarchive.tar.gz" settings.json)
+_cp_main --import "$TMP/legacyarchive.tar.gz" legacyimport >/dev/null
+check "import seeds legacy Codex config" \
+      '[ -f "$TMP/store/profiles/legacyimport/codex.config.toml" ]'
+
 _experr=$(_cp_main --export dev "$TMP/dev.tar.gz" 2>&1 >/dev/null)
 check "export wrote archive" '[ -s "$TMP/dev.tar.gz" ]'
 check "archive has settings" 'tar tzf "$TMP/dev.tar.gz" | grep -q "settings.json"'
+check "archive has Codex config" 'tar tzf "$TMP/dev.tar.gz" | grep -q "codex.config.toml"'
 check "archive has skills"   'tar tzf "$TMP/dev.tar.gz" | grep -q "skills/demo"'
 check "archive omits credentials" '! tar tzf "$TMP/dev.tar.gz" | grep -q "credentials"'
 check "archive omits plugins"     '! tar tzf "$TMP/dev.tar.gz" | grep -q "^plugins"'
@@ -546,6 +685,8 @@ check "help lists open"   '_cp_main --help | grep -q -- "--open"'
 check "status names the store path" '_cp_main | grep -q "^store: "'
 check "README exists"     '[ -f "$HERE/README.md" ]'
 check "README warns about profiles being ignored" 'grep -q "gitignore" "$HERE/README.md"'
+check "gitignore excludes preserved Codex config" \
+      'grep -qx "codex-default.config.toml" "$HERE/.gitignore"'
 
 echo "== Task 11b: symlinked content =="
 
@@ -701,6 +842,7 @@ rm -rf "$TMP/seed"
 
 echo "== shared prompt state =="
 
+# shellcheck disable=SC2031
 rm -f "$CLAUDE_PROFILES_DIR/prompt-state.json"
 cat > "$FAKEHOME/.claude.json" <<'JSON'
 { "projects": { "/repo/base": { "hasTrustDialogAccepted": true } } }
@@ -787,6 +929,8 @@ check_with "sourcing defines claude-profile under zsh" zsh \
    'zsh -c ". \"$CPX\"; case \$(command -v claude-profile) in claude-profile) exit 0 ;; *) exit 1 ;; esac"'
 check_with "sourced claude-profile reaches the dispatcher" bash \
    'env $XENV bash -c ". \"$CPX\"; claude-profile" | grep -q "^store: "'
+check_with "sourced agent-profile reaches the dispatcher" bash \
+   'env $XENV bash -c ". \"$CPX\"; agent-profile" | grep -q "^store: "'
 
 # A `claude` that misses the wrapper — raw binary earlier on PATH, another tool
 # spawning it — must still land in the active profile, or `claude plugins
@@ -855,9 +999,10 @@ env HOME="$IH_STABLE" SHELL=/bin/zsh CP_RC="$IH_STABLE/.zshrc" CP_ZSHENV="$IH_ST
 eq "install --from-npm succeeds" "$?" "0"
 check "code landed in the install dir" '[ -f "$IH_STABLE/.claude-profile/claude-profile.sh" ] &&
                                         [ -d "$IH_STABLE/.claude-profile/lib" ]'
-check "surface A is on PATH"      '[ -L "$IH_STABLE/.local/bin/claude-profile" ]'
-check "surface A actually runs"   'env HOME="$IH_STABLE" "$IH_STABLE/.local/bin/claude-profile" --help |
+check "primary command is on PATH" '[ -L "$IH_STABLE/.local/bin/agent-profile" ]'
+check "primary command actually runs" 'env HOME="$IH_STABLE" "$IH_STABLE/.local/bin/agent-profile" --help |
                                    grep -q -- "--create"'
+check "legacy command stays on PATH" '[ -L "$IH_STABLE/.local/bin/claude-profile" ]'
 check "shim installed"            '[ -x "$IH_STABLE/.claude-profile/bin/claude" ]'
 check "zshenv prepends the bin dir" \
    'grep -qF "$IH_STABLE/.claude-profile/bin" "$IH_STABLE/.zshenv"'
@@ -1053,7 +1198,7 @@ check "install adds a login hook on a bare HOME" \
 check_with "a login shell reaches the wrapper" bash \
    '[ "$(env HOME="$IH7" bash -l -i -c "command -v claude" 2>/dev/null)" = claude ]'
 
-# The installs above all satisfy the claude-profile half of the verify step, and
+# The installs above all satisfy the agent-profile half of the verify step, and
 # on a developer's machine they would satisfy it even if the check were vacuous:
 # a real ~/.local/bin/claude-profile is already on PATH. So prove the assertion
 # bites. The fixture is an entry script that defines the wrapper and nothing
@@ -1069,9 +1214,9 @@ env HOME="$IHCP" SHELL=/bin/bash PATH="/usr/bin:/bin" \
     CP_LINK_DIR="$TMP/cpstub-install/.local/bin" \
     CP_ZSHENV="$TMP/cpstub-install/.zshenv" \
     sh "$CPSTUB/install.sh" --no-migrate >"$TMP/cpstubout" 2>&1
-eq "install fails when claude-profile is unreachable" "$?" "1"
+eq "install fails when agent-profile is unreachable" "$?" "1"
 check "the failure names the missing command" \
-   'grep -q "no claude-profile" "$TMP/cpstubout"'
+   'grep -q "no agent-profile" "$TMP/cpstubout"'
 
 # Writing .bash_profile is only safe when the whole login chain is empty. Debian
 # ships a ~/.profile that already sources .bashrc, and bash reads just the first
@@ -1149,15 +1294,24 @@ UENV="$UENV CLAUDE_PROFILES_DIR=$IH12/.claude-profiles"
 env $UENV sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
 mkdir -p "$IH12/.claude-profiles/profiles/keepme"
 : > "$IH12/.claude-profiles/profiles/keepme/marker"
+mkdir -p "$IH12/.codex"
+printf 'model = "default"\n' > "$IH12/.claude-profiles/codex-default.config.toml"
+printf 'model = "profile"\n' > "$IH12/.claude-profiles/profiles/keepme/codex.config.toml"
+printf 'keepme\n' > "$IH12/.claude-profiles/active"
+ln -s "$IH12/.claude-profiles/profiles/keepme/codex.config.toml" \
+      "$IH12/.codex/config.toml"
 
 # shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
 env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >"$TMP/uninstout" 2>&1
 eq "uninstall succeeds" "$?" "0"
 check "install dir removed"       '[ ! -e "$IH12/.claude-profile" ]'
-check "symlink removed"           '[ ! -e "$IH12/.local/bin/claude-profile" ]'
+check "primary symlink removed"   '[ ! -e "$IH12/.local/bin/agent-profile" ]'
+check "legacy symlink removed"    '[ ! -e "$IH12/.local/bin/claude-profile" ]'
 check "rc line removed"           '! grep -q "claude-profile\.sh" "$IH12/.zshrc"'
 check "zshenv line removed"       '! grep -q "claude-profile/bin" "$IH12/.zshenv"'
 check "store left alone"          '[ -f "$IH12/.claude-profiles/profiles/keepme/marker" ]'
+check "uninstall restores original Codex config" \
+      '[ ! -L "$IH12/.codex/config.toml" ] && grep -q default "$IH12/.codex/config.toml"'
 check "uninstall names the store" 'grep -qF "$IH12/.claude-profiles" "$TMP/uninstout"'
 
 # shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
@@ -1303,7 +1457,8 @@ echo "== Task 18: store migration =="
 
 LEG="$TMP/legacy"
 NEW="$TMP/newstore"
-mkdir -p "$LEG/profiles/dev/hooks" "$LEG/exports"
+MIGRATE_HOME="$TMP/migrate-home"
+mkdir -p "$LEG/profiles/dev/hooks" "$LEG/exports" "$MIGRATE_HOME/.codex"
 printf '{ "statusLine": { "command": "%s/profiles/dev/statusline.sh" } }\n' "$LEG" \
     > "$LEG/profiles/dev/settings.json"
 printf '#!/bin/sh\n%s/profiles/dev/hooks/inner.sh\n' "$LEG" > "$LEG/profiles/dev/hooks/h.sh"
@@ -1311,12 +1466,20 @@ chmod +x "$LEG/profiles/dev/hooks/h.sh"
 printf 'printf hud\n' > "$LEG/profiles/dev/statusline.sh"
 printf '{ "projects": { "%s": { "n": 1 } } }\n' "$LEG" > "$LEG/profiles/dev/.claude.json"
 printf 'dev\n' > "$LEG/active"
+printf 'model = "default"\n' > "$LEG/codex-default.config.toml"
+printf 'model = "dev"\n' > "$LEG/profiles/dev/codex.config.toml"
+ln -s "$LEG/profiles/dev/codex.config.toml" "$MIGRATE_HOME/.codex/config.toml"
 
-out=$(CLAUDE_PROFILES_DIR="$NEW"; _cp_migrate_store "$LEG" 2>&1)
+# shellcheck disable=SC2030,SC2031
+out=$(HOME="$MIGRATE_HOME"; CLAUDE_PROFILES_DIR="$NEW"; export HOME CLAUDE_PROFILES_DIR
+      _cp_migrate_store "$LEG" 2>&1)
 eq "migration succeeds" "$?" "0"
 check "migration moved profiles"     '[ -d "$NEW/profiles/dev" ] && [ ! -e "$LEG/profiles" ]'
 check "migration moved active"       '[ -f "$NEW/active" ]'
 check "migration moved exports"      '[ -d "$NEW/exports" ]'
+check "migration moved default Codex config" '[ -f "$NEW/codex-default.config.toml" ]'
+eq "migration retargets active Codex config" \
+   "$(readlink "$MIGRATE_HOME/.codex/config.toml")" "$NEW/profiles/dev/codex.config.toml"
 check "settings.json points at the new store" \
    'grep -q "$NEW/profiles/dev/statusline.sh" "$NEW/profiles/dev/settings.json"'
 check "hook script points at the new store" \
@@ -1349,6 +1512,18 @@ check "merge refusal names the reason" 'echo "$out3" | grep -q "refusing to merg
 check "merge refusal leaves the fresh source untouched" \
    '[ -f "$FRESH/profiles/other/marker" ]'
 
+COLLIDE_FROM="$TMP/collide-legacy"
+COLLIDE_TO="$TMP/collide-store"
+mkdir -p "$COLLIDE_FROM/profiles/dev" "$COLLIDE_TO"
+printf 'old default\n' > "$COLLIDE_FROM/codex-default.config.toml"
+printf 'new default\n' > "$COLLIDE_TO/codex-default.config.toml"
+out_collision=$(CLAUDE_PROFILES_DIR="$COLLIDE_TO"; _cp_migrate_store "$COLLIDE_FROM" 2>&1)
+eq "migration refuses an existing Codex default" "$?" "1"
+check "Codex default collision names the reason" \
+   'echo "$out_collision" | grep -q "refusing to merge"'
+check "Codex default collision preserves both stores" \
+   'grep -q "old default" "$COLLIDE_FROM/codex-default.config.toml" && grep -q "new default" "$COLLIDE_TO/codex-default.config.toml" && [ -d "$COLLIDE_FROM/profiles/dev" ]'
+
 (CLAUDE_PROFILES_DIR="$NEW"; _cp_migrate_store "$TMP/nope" >/dev/null 2>&1)
 eq "migration refuses a missing source" "$?" "1"
 
@@ -1356,9 +1531,6 @@ MT="$TMP/emptylegacy"; mkdir -p "$MT"
 (CLAUDE_PROFILES_DIR="$TMP/store3"; _cp_migrate_store "$MT" >/dev/null 2>&1)
 eq "migration refuses a source with no profiles" "$?" "1"
 
-# A failure partway through the entry moves must not leave the retry message
-# implying the drained parts are gone for good -- exports/ here is blocked by
-# a same-named plain file already sitting in the destination.
 LEG2="$TMP/legacy2"
 TO2="$TMP/store5"
 mkdir -p "$LEG2/profiles/x" "$LEG2/exports" "$TO2"
@@ -1366,13 +1538,11 @@ printf 'p\n' > "$LEG2/profiles/x/marker"
 printf 'dev\n' > "$LEG2/active"
 printf 'blocker\n' > "$TO2/exports"
 out4=$(CLAUDE_PROFILES_DIR="$TO2"; _cp_migrate_store "$LEG2" 2>&1)
-eq "partial move failure exits 1" "$?" "1"
-check "partial move failure names what already moved" 'echo "$out4" | grep -q "already moved"'
-check "partial move failure names the entry that failed" 'echo "$out4" | grep -q "exports"'
-check "partial move failure warns against deleting the source" \
-   'echo "$out4" | grep -q "do not delete"'
-check "the already-moved entries really did move" '[ -d "$TO2/profiles/x" ]'
-check "the not-yet-moved entry is still in the source" '[ -e "$LEG2/exports" ]'
+eq "entry collision fails before migration" "$?" "1"
+check "entry collision names the conflicting entry" 'echo "$out4" | grep -q "exports"'
+check "entry collision leaves the source untouched" \
+   '[ -d "$LEG2/profiles/x" ] && [ -e "$LEG2/active" ] && [ -e "$LEG2/exports" ]'
+check "entry collision moves nothing to the destination" '[ ! -e "$TO2/profiles" ]'
 
 # A legacy path containing BRE metacharacters must still be recognised and
 # rewritten -- grep/sed would otherwise read *, [, ], ^, $, . as regex syntax
@@ -1419,6 +1589,7 @@ env $XENV "$CPX" --create shimprof >/dev/null
 printf 'shimprof\n' > "$TMP/xstore/active"
 
 check "bin/claude-profile is a symlink" '[ -L "$HERE/bin/claude-profile" ]'
+check "bin/agent-profile is a symlink" '[ -L "$HERE/bin/agent-profile" ]'
 # Assert the link text, not a dereferenced path: _cp_deref resolves a relative
 # link against its own directory, so it returns "<repo>/bin/../claude-profile.sh"
 # -- correct, and never string-equal to "<repo>/claude-profile.sh".
@@ -1426,6 +1597,8 @@ eq "bin/claude-profile points at the entry script" \
    "$(readlink "$HERE/bin/claude-profile")" "../claude-profile.sh"
 check "symlinked entry still finds lib" \
    'env $XENV "$HERE/bin/claude-profile" | grep -q "^store: "'
+check "primary symlinked entry still finds lib" \
+   'env $XENV "$HERE/bin/agent-profile" | grep -q "^store: "'
 
 # shellcheck disable=SC2086 # $XENV holds space-separated KEY=VALUE pairs for env to split
 out=$(env $XENV _CP_RUNNER="$TMP/fakerunner" "$HERE/bin/claude" --version 2>&1)

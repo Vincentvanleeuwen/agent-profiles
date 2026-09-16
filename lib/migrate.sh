@@ -4,7 +4,7 @@
 #
 # Sourced by ../claude-profile.sh. Not standalone: no shebang, no set -e.
 
-_CP_MIGRATE_ENTRIES="profiles active exports .backups prompt-state.json"
+_CP_MIGRATE_ENTRIES="profiles active exports .backups prompt-state.json codex-default.config.toml"
 
 _cp_migrate_store() {
     _ms_from="$1"
@@ -34,10 +34,13 @@ _cp_migrate_store() {
         fi
         return 1
     fi
-    if [ -e "$_ms_to/profiles" ]; then
-        printf 'claude-profile: "%s" already has profiles/; refusing to merge\n' "$_ms_to" >&2
-        return 1
-    fi
+    for _ms_e in $_CP_MIGRATE_ENTRIES; do
+        if { [ -e "$_ms_from/$_ms_e" ] || [ -L "$_ms_from/$_ms_e" ]; } &&
+           { [ -e "$_ms_to/$_ms_e" ] || [ -L "$_ms_to/$_ms_e" ]; }; then
+            printf 'claude-profile: "%s" already has %s; refusing to merge\n' "$_ms_to" "$_ms_e" >&2
+            return 1
+        fi
+    done
     # sed builds the rewrite expression from these paths, so a path containing
     # a delimiter or an escape would silently corrupt the file instead.
     case "$_ms_from$_ms_to" in
@@ -62,6 +65,13 @@ _cp_migrate_store() {
         _ms_moved="${_ms_moved:+$_ms_moved }$_ms_e"
     done
     _cp_migrate_rewrite "$_ms_from" "$_ms_to" || return 1
+    _ms_codex_link=$(readlink "$HOME/.codex/config.toml" 2>/dev/null)
+    case "$_ms_codex_link" in
+        "$_ms_from"/*)
+            _ms_codex_target="$_ms_to/${_ms_codex_link#"$_ms_from"/}"
+            [ -e "$_ms_codex_target" ] && _cp_codex_link "$_ms_codex_target" || return 1
+            ;;
+    esac
     printf 'store is now %s\n' "$_ms_to"
 }
 

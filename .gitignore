@@ -6,4 +6,6 @@ active
 .superpowers/
 docs/superpowers/
 prompt-state.json
+codex-default.config.toml
+codex-default.config.toml.tmp.*
 graphify-out/
