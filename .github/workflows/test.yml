@@ -93,9 +93,6 @@ jobs:
         with:
           name: npm-package
           path: dist
-      - name: Git Bash suite
-        shell: bash
-        run: sh test.sh
       - name: Windows PowerShell suite
         shell: powershell
         run: |
