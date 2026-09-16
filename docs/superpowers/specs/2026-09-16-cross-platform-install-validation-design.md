@@ -127,10 +127,10 @@ a measurable release bottleneck.
 | --- | --- | --- | --- |
 | POSIX unit suite | sh, bash, zsh | sh, bash, zsh | Git Bash |
 | PowerShell suite | PowerShell 7 | PowerShell 7 | 5.1 and 7 |
-| Fresh npm install | yes | yes | expected guidance until supported |
+| Fresh npm install | yes | yes | yes |
 | Fresh clone install | yes | yes | Git Bash and `install.ps1` |
 | Fake Claude adapter | yes | yes | yes |
-| Fake Codex adapter | yes | yes | yes after PowerShell support |
+| Fake Codex adapter | yes | yes | yes |
 | Fake Gemini adapter | yes | yes | yes |
 | Real clients | nightly | nightly | nightly |
 | Authenticated request | one nightly runner | optional diagnostic | optional diagnostic |

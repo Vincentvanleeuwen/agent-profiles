@@ -1,13 +1,15 @@
 # Agent Profiles
 
-Switch Claude Code and Codex between named configuration profiles without
-editing `~/.claude` or `~/.codex` by hand.
+Switch Claude Code, Codex, and Gemini CLI between named configuration profiles
+without editing their user settings by hand.
 
 A profile is a complete `CLAUDE_CONFIG_DIR`. Claude Code honours that variable
 natively, so switching is just pointing it somewhere else. Each profile also
 owns a `codex.config.toml`. The switcher links `~/.codex/config.toml` to that
-file, which covers both the Codex CLI and desktop app. Claude settings are not
-translated; each tool keeps its native configuration.
+file, which covers both the Codex CLI and desktop app. It does the same for
+Gemini CLI's documented `~/.gemini/settings.json`, stored per profile as
+`gemini.settings.json`. Claude settings are not translated; each tool keeps its
+native configuration.
 
 ## Install
 
@@ -42,10 +44,11 @@ installer moves the old default directories from `~/.claude-profile` and
 `.claude-profile` project pin and `CLAUDE_PROFILE*` environment variables stay
 compatible.
 
-On Windows, npm's postinstall cannot yet run the unmigrated `install.ps1` and
-prints a message telling you to clone the repo and run it yourself instead.
-See [Windows](#windows). Codex switching is currently available through the
-POSIX installer only; PowerShell still switches Claude alone.
+On Windows the same npm command runs `install.ps1`, copies the package into the
+stable install directory, and updates your PowerShell profile. npm 11 may block
+install scripts until you allow this package; follow its
+`--allow-scripts=agent-profiles` prompt, or run `agent-profile-install` after
+installation. See [Windows](#windows).
 
 `install.sh` adds the `source` line to your `~/.zshrc`, `~/.bashrc` or
 `~/.bash_profile` — whichever your shell actually reads, which differs between
@@ -84,13 +87,20 @@ agent-profile --create development
 agent-profile development
 ```
 
-`claude` and Codex now use that profile. `agent-profile default` goes back to
-plain `~/.claude` and the original Codex config.
+`claude`, Codex, and Gemini CLI now use that profile. `agent-profile default`
+goes back to plain `~/.claude` and the original Codex and Gemini settings.
 
 The first switch preserves the existing `~/.codex/config.toml` as
-`~/.agent-profiles/codex-default.config.toml`. Existing profiles get a copy of
-that default the first time they are selected. Restart an open Codex session
-after switching; running sessions keep the settings they started with.
+`~/.agent-profiles/codex-default.config.toml` and
+`~/.gemini/settings.json` as
+`~/.agent-profiles/gemini-default.settings.json`. Existing profiles get copies
+of those defaults the first time they are selected. Restart open clients after
+switching; running sessions keep the settings they started with.
+
+Ollama and LM Studio need no runtime adapter in Agent Profiles: Codex's native
+provider, endpoint, and model settings stay in `codex.config.toml` with the
+profile. The tests cover both local endpoints as settings data. Agent Profiles
+does not install or start either provider, download models, or make a request.
 
 ### The two commands
 
@@ -185,18 +195,10 @@ function, `agent-profile` as an alias:
 .\install.ps1
 ```
 
-Both can be installed at once, and should be if you use both. They are meant
-to share one store, so that a profile created in either is visible in both —
-but that is **not currently true**. Only the Git Bash / `install.sh` half
-defaults to `~/.agent-profiles`; `install.ps1`'s store still defaults to its
-own module directory. Left on defaults, the two halves read two different
-stores and `agent-profile` lists different profiles depending on which one
-you're in. Until the PowerShell half is migrated too, set
-`CLAUDE_PROFILES_DIR` explicitly, to the same path, for both — and install
-from a git clone with `install.ps1`; `npm i -g agent-profiles` on Windows
-does not run it (see [Install](#install)). npm 11 may first print its own
-`--allow-scripts=agent-profiles` warning because it blocks package install
-scripts by default; the supported Windows path is still the clone installer.
+Both can be installed at once, and should be if you use both. They share
+`~/.agent-profiles` by default, so a profile created in either is visible in
+both. `install.ps1` copies the code into `~/.agent-profile`; installing from a
+clone or npm therefore leaves the same stable layout.
 
 `install.ps1` edits `$PROFILE`, checks that a fresh PowerShell really does end
 up with both commands defined, and warns if your execution policy is
@@ -211,11 +213,13 @@ this is the spelling that does not print a warning every time you open a shell.
 `Get-Command agent-profile` reports it as an `Alias` for `Invoke-CpProfile`;
 both names work.
 
-Only two things are reimplemented in PowerShell: working out which profile is
-selected, and starting `claude.exe` with `CLAUDE_CONFIG_DIR` set. Every
-management subcommand is handed to `agent-profile.sh` under Git Bash, so Git
-for Windows is a requirement for those — switching and launching work without
-it. If Git is somewhere unusual, point `$env:CLAUDE_PROFILE_BASH` at
+Profile selection, Claude launching, and Codex/Gemini settings switching are
+native PowerShell operations. Windows uses atomic file copies for the two
+settings files instead of symlinks, so developer mode or administrator rights
+are not required. Every other management subcommand is handed to
+`agent-profile.sh` under Git Bash, so Git for Windows is a requirement for
+those — switching and launching work without it. If Git is somewhere unusual,
+point `$env:CLAUDE_PROFILE_BASH` at
 `bash.exe`. Do not point it at the `bash.exe` on `PATH` if you have WSL
 installed: that is a different operating system with a different `$HOME`, and it
 would quietly operate on a different store.
@@ -310,8 +314,9 @@ Per-profile (copied): everything not on the shared list below — `settings.json
 `CLAUDE.md`, `skills/`, `commands/`, `hooks/`, `agents/`, `scripts/`,
 `statusline.sh`, `.claude.json`, and anything else sitting in `~/.claude`
 (`.caveman-active`, `teams/`, `agentic-os/`, whatever a future Claude Code
-version adds), plus `codex.config.toml`. It's copy-the-rest, not an allowlist, so
-nothing here needs updating when Claude Code grows a new config file.
+version adds), plus `codex.config.toml` and `gemini.settings.json`. It's
+copy-the-rest, not an allowlist, so nothing here needs updating when Claude
+Code grows a new config file.
 
 Shared across all profiles (symlinked back to `~/.claude`): `plugins/` (the
 download cache — install once, enable per profile in `settings.json`),
@@ -320,15 +325,16 @@ and the runtime directories.
 
 ## Where the data lives
 
-Profiles and the preserved default Codex config live in `~/.agent-profiles`
-by default — outside any clone, so a clone can be deleted or moved without
-losing them. `profiles/` holds the profiles themselves, `active` the active
-profile name, `.backups/` the pre-update snapshots. Set `CLAUDE_PROFILES_DIR`
-to put the store somewhere else instead. If you point it at a git-tracked
-directory anyway — including this clone's own, pre-migration — `profiles/`,
-`active`, `.backups/`, `exports/`, `prompt-state.json` and
-`codex-default.config.toml` are all in this repo's `.gitignore`, so a profile's
-`settings.json` and any API keys in it were never at risk of being committed.
+Profiles and the preserved default Codex and Gemini settings live in
+`~/.agent-profiles` by default — outside any clone, so a clone can be deleted
+or moved without losing them. `profiles/` holds the profiles themselves,
+`active` the active profile name, `.backups/` the pre-update snapshots. Set
+`CLAUDE_PROFILES_DIR` to put the store somewhere else instead. If you point it
+at a git-tracked directory anyway — including this clone's own, pre-migration —
+`profiles/`, `active`, `.backups/`, `exports/`, `prompt-state.json`,
+`codex-default.config.toml`, and `gemini-default.settings.json` are all in this
+repo's `.gitignore`, so a profile's settings and any API keys in them were never
+at risk of being committed.
 Upgrading from a version that kept `profiles/` inside the clone? See
 [Moving off an old clone](#moving-off-an-old-clone).
 
@@ -340,8 +346,9 @@ becomes a problem.
 
 **`--export` can leak secrets that aren't credentials.** The tarball
 structurally excludes `.credentials.json`, but `settings.json` and
-`codex.config.toml` are included. Anything you've put in an environment block,
-MCP config or hook command travels with the archive. The tool warns when it
+`codex.config.toml` and `gemini.settings.json` are included. Anything you've put
+in an environment block, MCP config, endpoint, or hook command travels with the
+archive. The tool warns when it
 sees a top-level `env` key and prints the manifest of what's inside — read that
 manifest before you send the file to anyone. **The warning itself needs Python**: without it the
 check silently fails and no warning is printed, so on a machine with no
@@ -444,9 +451,8 @@ zsh test.sh && bash test.sh && sh test.sh
 powershell -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
-The fresh-install checks go one step further. POSIX installs the packed npm
-artifact, not the checkout; Windows follows the documented clone plus
-`install.ps1` path:
+The fresh-install checks go one step further. POSIX and Windows install the
+packed npm artifact; Windows also checks the clone plus `install.ps1` path:
 
 ```sh
 npm run test:fresh:posix
@@ -458,12 +464,13 @@ powershell -ExecutionPolicy Bypass -File .\test\fresh-install.ps1
 
 Pull requests run these paths on `ubuntu-latest`, `macos-latest`, and
 `windows-latest`. Every job uses disposable config, install, store, npm prefix
-and shell files. Nothing reads or writes your real `~/.claude`, `~/.codex`, or
-profile store.
+and shell files. Nothing reads or writes your real `~/.claude`, `~/.codex`,
+`~/.gemini`, or profile store. The fixtures switch Ollama and LM Studio endpoint
+settings without starting either provider.
 
 This first CI layer does not install real AI clients or make authenticated model
-calls. The later Gemini, local-provider, nightly client, and release checks are
-specified in the [cross-platform validation design](docs/superpowers/specs/2026-09-16-cross-platform-install-validation-design.md).
+calls. The nightly client and release checks are specified in the
+[cross-platform validation design](docs/superpowers/specs/2026-09-16-cross-platform-install-validation-design.md).
 
 `test.ps1` ends with a drift guard. Profile resolution is the one piece of logic
 that exists twice — `lib/resolve.sh` and `agent-profile.psm1` — so rather than

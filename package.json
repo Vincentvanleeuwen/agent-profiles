@@ -1,7 +1,7 @@
 {
   "name": "agent-profiles",
   "version": "0.1.0",
-  "description": "Switch Claude Code and Codex between isolated config profiles",
+  "description": "Switch Claude Code, Codex, and Gemini CLI between isolated config profiles",
   "license": "MIT",
   "bin": {
     "agent-profile-install": "bin/claude-profile-install.mjs",
