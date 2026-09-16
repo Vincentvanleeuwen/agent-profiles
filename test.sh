@@ -1356,6 +1356,11 @@ check "install picks .zshrc for a zsh login shell" \
    'env HOME="$IH2" SHELL=/bin/zsh sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1 &&
     grep -qF "agent-profile.sh" "$IH2/.zshrc"'
 
+IH_NOISY="$TMP/ihome-noisy-zsh"; mkdir -p "$IH_NOISY"
+printf 'printf "startup noise\\n"\n' > "$IH_NOISY/.zshrc"
+check "install ignores unrelated zsh startup output" \
+   'env HOME="$IH_NOISY" SHELL=/bin/zsh sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1'
+
 # A named shell with no rc yet is a fresh account, not an ambiguity.
 IH3="$TMP/ihome3"; mkdir -p "$IH3"
 check "install creates a missing rc for a known shell" \

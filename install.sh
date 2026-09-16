@@ -552,7 +552,9 @@ else
     # matters: a bare name for a function, an `alias ...=` line for an alias,
     # and a path for a binary. Aliases exist only in interactive shells, which
     # is the second reason this is not a `-c` away.
-    seen=$("$verify_bin" -i -c 'command -v claude' 2>/dev/null)
+    seen=$("$verify_bin" -i -c \
+        'printf "__agent_profiles_probe__%s\n" "$(command -v claude)"' 2>/dev/null |
+        sed -n 's/^__agent_profiles_probe__//p')
     case "$seen" in
         claude) say "verified: a new interactive $want_shell defines the wrapper" ;;
         alias*)
@@ -572,7 +574,9 @@ else
     # one is a working install, so this insists on one of them rather than on
     # which. It does insist, though: ~/.local/bin is absent from the default PATH
     # on macOS, so the symlink on its own is not something to take on trust.
-    seen_cp=$("$verify_bin" -i -c 'command -v agent-profile' 2>/dev/null)
+    seen_cp=$("$verify_bin" -i -c \
+        'printf "__agent_profiles_probe__%s\n" "$(command -v agent-profile)"' 2>/dev/null |
+        sed -n 's/^__agent_profiles_probe__//p')
     case "$seen_cp" in
         "")
             die "wrote $rc, but a new interactive $want_shell has no agent-profile
@@ -591,7 +595,10 @@ else
     # Login shells read a different file, and that difference is the whole bug
     # this check exists for: a source line in .bashrc that `bash -l` never
     # reaches, on an install that otherwise looks perfect.
-    if [ "$("$verify_bin" -l -i -c 'command -v claude' 2>/dev/null)" = claude ]; then
+    login_seen=$("$verify_bin" -l -i -c \
+        'printf "__agent_profiles_probe__%s\n" "$(command -v claude)"' 2>/dev/null |
+        sed -n 's/^__agent_profiles_probe__//p')
+    if [ "$login_seen" = claude ]; then
         say "verified: login shells pick it up too"
     else
         login_gap=1
