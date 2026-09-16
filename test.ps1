@@ -55,6 +55,22 @@ Check 'claude-profile resolves to the dispatcher' 'Invoke-CpProfile' `
 Check 'the alias target is exported too' 'Function' `
     (Get-Command Invoke-CpProfile -ErrorAction SilentlyContinue).CommandType
 
+$freshInstall = Join-Path $selfDir 'test\fresh-install.ps1'
+Check 'fresh PowerShell smoke exists' $true `
+    (Test-Path -LiteralPath $freshInstall -PathType Leaf)
+if (Test-Path -LiteralPath $freshInstall -PathType Leaf) {
+    $parseTokens = $null
+    $parseErrors = $null
+    [void][Management.Automation.Language.Parser]::ParseFile(
+        $freshInstall, [ref]$parseTokens, [ref]$parseErrors
+    )
+    Check 'fresh PowerShell smoke parses' 0 $parseErrors.Count
+}
+$package = Get-Content -Raw -LiteralPath (Join-Path $selfDir 'package.json') | ConvertFrom-Json
+Check 'fresh PowerShell npm script is wired' `
+    'powershell -ExecutionPolicy Bypass -File test/fresh-install.ps1' `
+    $package.scripts.'test:fresh:windows'
+
 Remove-Module agent-profile -Force
 Import-Module (Join-Path $selfDir 'claude-profile.psm1') -Force
 Check 'legacy module exports claude' 'Function' `

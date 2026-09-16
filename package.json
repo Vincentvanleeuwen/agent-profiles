@@ -23,7 +23,8 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
     "test": "sh test.sh",
-    "test:fresh:posix": "sh test/fresh-install.sh"
+    "test:fresh:posix": "sh test/fresh-install.sh",
+    "test:fresh:windows": "powershell -ExecutionPolicy Bypass -File test/fresh-install.ps1"
   },
   "engines": { "node": ">=18" }
 }
