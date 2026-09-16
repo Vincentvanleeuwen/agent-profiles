@@ -156,7 +156,7 @@ if ($existingText -match '(agent|claude)-profile\.psm1') {
 # Execution policy decides whether that file is read at all. Report it; do not
 # change it. Silently loosening a security setting on someone's machine is not
 # this script's business.
-$effective = Get-ExecutionPolicy
+$effective = try { Get-ExecutionPolicy } catch { $null }
 if ($effective -in @('Restricted', 'AllSigned')) {
     Warn ""
     Warn "install: the execution policy is $effective, so PowerShell will refuse to"

@@ -97,15 +97,20 @@ jobs:
         shell: powershell
         run: |
           powershell -NoLogo -ExecutionPolicy Bypass -File .\test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           powershell -NoLogo -ExecutionPolicy Bypass -File .\test\fresh-install.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: PowerShell 7 suite
         shell: pwsh
         run: |
           pwsh -NoLogo -File .\test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pwsh -NoLogo -File .\test\fresh-install.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $packages = @(Get-ChildItem -LiteralPath dist -Filter '*.tgz')
           if ($packages.Count -ne 1) { throw "expected one package, found $($packages.Count)" }
           pwsh -NoLogo -File .\test\fresh-install.ps1 -PackagePath $packages[0].FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Record versions
         if: always()
         shell: pwsh

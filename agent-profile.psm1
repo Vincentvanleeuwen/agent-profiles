@@ -196,15 +196,17 @@ function Copy-CpFileAtomic {
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
     }
     $tmp = "$Destination.tmp.$PID"
+    $backup = "$Destination.bak.$PID"
     try {
         Copy-Item -LiteralPath $Source -Destination $tmp -Force
         if (Test-Path -LiteralPath $Destination -PathType Leaf) {
-            [IO.File]::Replace($tmp, $Destination, $null)
+            [IO.File]::Replace($tmp, $Destination, $backup)
         } else {
             [IO.File]::Move($tmp, $Destination)
         }
     } finally {
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -215,15 +217,17 @@ function Write-CpTextAtomic {
         New-Item -ItemType Directory -Force -Path $dir | Out-Null
     }
     $tmp = "$Destination.tmp.$PID"
+    $backup = "$Destination.bak.$PID"
     try {
         [IO.File]::WriteAllText($tmp, $Text, (New-Object System.Text.UTF8Encoding($false)))
         if (Test-Path -LiteralPath $Destination -PathType Leaf) {
-            [IO.File]::Replace($tmp, $Destination, $null)
+            [IO.File]::Replace($tmp, $Destination, $backup)
         } else {
             [IO.File]::Move($tmp, $Destination)
         }
     } finally {
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
     }
 }
 
