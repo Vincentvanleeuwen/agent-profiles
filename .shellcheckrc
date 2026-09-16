@@ -11,6 +11,7 @@ shell=sh
 disable=SC2016  # "expressions don't expand in single quotes" — the eval strings, and the statusline block, which must stay literal
 disable=SC2034  # "appears unused" — variables read only inside check '...' strings
 disable=SC2329  # "function never invoked" — date() stubs, called indirectly by the code under test
+disable=SC2317  # "command appears unreachable" — function stubs invoked indirectly in subshells
 
 # The lib/ files are sourced from a loop variable, so the path is not a literal
 # shellcheck can follow. Each lib file is passed as its own input instead, which

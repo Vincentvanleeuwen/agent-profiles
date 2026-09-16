@@ -50,11 +50,13 @@ jobs:
         with:
           name: npm-package
           path: dist
+      - name: Install zsh on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get install --no-install-recommends --yes zsh
       - name: Run shell suites
         run: |
           sh test.sh
           bash test.sh
-          zsh test.sh
       - name: Install the packed artifact
         run: |
           set -- dist/*.tgz

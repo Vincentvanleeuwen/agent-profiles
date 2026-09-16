@@ -161,7 +161,9 @@ _cp_real_claude() {
             *)   _rc_d=$_rc_rest; _rc_rest= ;;
         esac
         [ -n "$_rc_d" ] || _rc_d=.
-        [ -f "$_rc_d/claude" ] && [ -x "$_rc_d/claude" ] || continue
+        if [ ! -f "$_rc_d/claude" ] || [ ! -x "$_rc_d/claude" ]; then
+            continue
+        fi
         case "$(_cp_deref "$_rc_d/claude")" in
             "$_rc_skip"/*) continue ;;
         esac
