@@ -1,5 +1,5 @@
 #!/bin/sh
-# Add the `source` line for claude-profile.sh to your shell rc, then prove it
+# Add the `source` line for agent-profile.sh to your shell rc, then prove it
 # worked. Safe to re-run: an install that is already correct is a no-op.
 #
 # The failure this exists to prevent: without that line there is no `claude`
@@ -18,7 +18,7 @@ LEGACY_STORE="$HOME/.claude-profiles"
 BIN_DIR="$INSTALL_DIR/bin"
 LINK_DIR=${CP_LINK_DIR:-$HOME/.local/bin}
 ZSHENV=${CP_ZSHENV:-$HOME/.zshenv}
-TARGET="$INSTALL_DIR/claude-profile.sh"
+TARGET="$INSTALL_DIR/agent-profile.sh"
 LINE=". \"$TARGET\""
 ZSHENV_MARK="# claude-profile PATH — added by install.sh"
 
@@ -89,7 +89,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ -f "$SELF_DIR/claude-profile.sh" ] || die "cannot find $SELF_DIR/claude-profile.sh"
+[ -f "$SELF_DIR/agent-profile.sh" ] || die "cannot find $SELF_DIR/agent-profile.sh"
 [ -d "$SELF_DIR/lib" ] || die "cannot find $SELF_DIR/lib — is the clone complete?"
 [ -d "$SELF_DIR/bin" ] || die "cannot find $SELF_DIR/bin — is the clone complete?"
 
@@ -105,7 +105,8 @@ preflight_migrations() {
     if [ -z "${CLAUDE_PROFILE_INSTALL_DIR:-}" ] && [ -d "$LEGACY_INSTALL_DIR" ]; then
         [ ! -e "$INSTALL_DIR" ] \
             || die "both $LEGACY_INSTALL_DIR and $INSTALL_DIR exist; refusing to merge them"
-        if [ ! -f "$LEGACY_INSTALL_DIR/claude-profile.sh" ] ||
+        if { [ ! -f "$LEGACY_INSTALL_DIR/agent-profile.sh" ] &&
+             [ ! -f "$LEGACY_INSTALL_DIR/claude-profile.sh" ]; } ||
            [ ! -d "$LEGACY_INSTALL_DIR/lib" ] || [ ! -d "$LEGACY_INSTALL_DIR/bin" ]; then
             die "$LEGACY_INSTALL_DIR is not a recognised installation; refusing to move it"
         fi
@@ -321,7 +322,7 @@ restore_codex_config() {
 # top of this file already refused /, $HOME and its ancestors before any flag ran.
 if [ -n "$uninstall" ]; then
     restore_codex_config
-    drop_lines "$rc" '^[[:space:]]*(\.|source)[[:space:]].*claude-profile\.sh'
+    drop_lines "$rc" '^[[:space:]]*(\.|source)[[:space:]].*(agent|claude)-profile\.sh'
     drop_lines "$rc" '^# claude-profile — added by install.sh$'
     drop_zshenv_block "$ZSHENV"
     # Only remove the symlink if it is actually ours: a foreign file or link
@@ -346,7 +347,7 @@ fi
 copy_code() {
     [ "$SELF_DIR" = "$INSTALL_DIR" ] && return 0
     mkdir -p "$INSTALL_DIR" || die "could not create $INSTALL_DIR; nothing was installed"
-    for _item in claude-profile.sh lib bin claude-profile.psm1; do
+    for _item in agent-profile.sh agent-profile.psm1 claude-profile.sh claude-profile.psm1 lib bin; do
         [ -e "$SELF_DIR/$_item" ] || continue
         if [ -n "${migrated_legacy_install:-}" ] && [ -d "$SELF_DIR/$_item" ]; then
             mkdir -p "$INSTALL_DIR/$_item" || die "could not create $INSTALL_DIR/$_item"
@@ -360,12 +361,9 @@ copy_code() {
         cp -R "$SELF_DIR/$_item" "$INSTALL_DIR/$_item" \
             || die "could not copy $_item into $INSTALL_DIR; $INSTALL_DIR exists but the copy is incomplete"
     done
-    # npm strips symlinks from published tarballs, so a package install can
-    # arrive without this one; a git clone already has it via the cp -R above.
-    # Stays a symlink, not a wrapper: link_bin points ~/.local/bin/claude-profile here,
-    # so a dirname "$0" wrapper would resolve its sibling against the wrong directory.
-    [ -e "$BIN_DIR/claude-profile" ] || ln -s ../claude-profile.sh "$BIN_DIR/claude-profile"
-    [ -e "$BIN_DIR/agent-profile" ] || ln -s ../claude-profile.sh "$BIN_DIR/agent-profile"
+    # npm strips symlinks from published tarballs, so package installs recreate these.
+    [ -e "$BIN_DIR/claude-profile" ] || ln -s ../agent-profile.sh "$BIN_DIR/claude-profile"
+    [ -e "$BIN_DIR/agent-profile" ] || ln -s ../agent-profile.sh "$BIN_DIR/agent-profile"
     [ -n "$no_shim" ] && rm -f "$BIN_DIR/claude"
     say "installed the code to $INSTALL_DIR"
 }
@@ -446,28 +444,29 @@ add_zshenv_path
 
 # Already mentioned: either it's our line already, or it points at a clone
 # and needs repointing at the tree copy_code just installed — never refuse.
-existing=$(grep -n 'claude-profile\.sh' "$rc" 2>/dev/null || true)
+existing=$(grep -nE '(agent|claude)-profile\.sh' "$rc" 2>/dev/null || true)
 if [ -n "$existing" ]; then
-    if grep -qxF "$LINE" "$rc"; then
-        say "already installed in $rc"
-    else
-        # Collapse any duplicates to one line while we are here.
-        _t="$rc.cp-tmp.$$"
-        awk -v line="$LINE" '
-            /claude-profile\.sh/ && /^[[:space:]]*(\.|source)[[:space:]]/ {
-                if (!done) { print line; done = 1 }
-                next
-            }
-            { print }
-        ' "$rc" > "$_t" || { rm -f "$_t"; die "the code is installed and both PATH surfaces are set up, but could not rewrite $rc"; }
-        if ! grep -qxF "$LINE" "$_t"; then
-            rm -f "$_t"
-            die "the code is installed and both PATH surfaces are set up, but $rc
-     mentions claude-profile.sh in a form this script does not recognise as a
+    # Collapse any duplicates to one canonical line while we are here.
+    _t="$rc.cp-tmp.$$"
+    awk -v line="$LINE" '
+        /(agent|claude)-profile\.sh/ && /^[[:space:]]*(\.|source)[[:space:]]/ {
+            if (!done) { print line; done = 1 }
+            next
+        }
+        { print }
+    ' "$rc" > "$_t" || { rm -f "$_t"; die "the code is installed and both PATH surfaces are set up, but could not rewrite $rc"; }
+    if ! grep -qxF "$LINE" "$_t"; then
+        rm -f "$_t"
+        die "the code is installed and both PATH surfaces are set up, but $rc
+     mentions a profile entry script in a form this installer does not recognise as a
      source line. Fix it by hand, then run this again:
 
 $(printf '%s\n' "$existing" | sed 's/^/         /')"
-        fi
+    fi
+    if cmp -s "$rc" "$_t"; then
+        rm -f "$_t"
+        say "already installed in $rc"
+    else
         mv "$_t" "$rc" || { rm -f "$_t"; die "the code is installed and both PATH surfaces are set up, but could not rewrite $rc"; }
         say "pointed the source line in $rc at $TARGET"
     fi

@@ -163,15 +163,16 @@ agent-profile: command not found
 Running the script directly needs no install at all:
 
 ```sh
-./claude-profile.sh --create development
-./claude-profile.sh development
-./claude-profile.sh development -- --version
+./agent-profile.sh --create development
+./agent-profile.sh development
+./agent-profile.sh development -- --version
 ```
 
 Every subcommand works this way. What you give up is the shadowing: a bare
 `claude` reads `~/.claude` no matter which profile is active, because only a
 function already in your shell can change that. Start sessions with
-`./claude-profile.sh <name> -- <args>` instead.
+`./agent-profile.sh <name> -- <args>` instead. The old
+`./claude-profile.sh` entry point remains as a compatibility shim.
 
 ### Windows
 
@@ -210,7 +211,7 @@ both names work.
 
 Only two things are reimplemented in PowerShell: working out which profile is
 selected, and starting `claude.exe` with `CLAUDE_CONFIG_DIR` set. Every
-management subcommand is handed to `claude-profile.sh` under Git Bash, so Git
+management subcommand is handed to `agent-profile.sh` under Git Bash, so Git
 for Windows is a requirement for those — switching and launching work without
 it. If Git is somewhere unusual, point `$env:CLAUDE_PROFILE_BASH` at
 `bash.exe`. Do not point it at the `bash.exe` on `PATH` if you have WSL
@@ -443,7 +444,7 @@ Tests run against a temporary store and a temporary fake home. They never read
 or write your real `~/.claude` or `~/.codex`.
 
 `test.ps1` ends with a drift guard. Profile resolution is the one piece of logic
-that exists twice — `lib/resolve.sh` and `claude-profile.psm1` — so rather than
+that exists twice — `lib/resolve.sh` and `agent-profile.psm1` — so rather than
 checking the PowerShell version against hardcoded expectations, it runs both
 against the same temporary store and fails if they disagree. It skips itself
 with a printed note when Git Bash is not installed.

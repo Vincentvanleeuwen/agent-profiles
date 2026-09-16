@@ -2,19 +2,19 @@
 # and a temporary HOME, never the real ~/.claude.
 #
 # The last block is the one worth keeping honest. Profile resolution is the only
-# logic that exists twice -- once in lib/resolve.sh, once in claude-profile.psm1 --
+# logic that exists twice -- once in lib/resolve.sh, once in agent-profile.psm1 --
 # so it is checked against the sh implementation rather than against a hardcoded
 # expectation, and drift between the two fails the suite.
 #
 # Usage: powershell -ExecutionPolicy Bypass -File .\test.ps1
 #
-# ASCII only, for the reason given at the top of claude-profile.psm1.
+# ASCII only, for the reason given at the top of agent-profile.psm1.
 
 $ErrorActionPreference = 'Stop'
 
 $selfDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Import-Module (Join-Path $selfDir 'claude-profile.psm1') -Force
-$mod = Get-Module claude-profile
+Import-Module (Join-Path $selfDir 'agent-profile.psm1') -Force
+$mod = Get-Module agent-profile
 
 $script:Pass = 0
 $script:Fail = 0
@@ -54,6 +54,16 @@ Check 'claude-profile resolves to the dispatcher' 'Invoke-CpProfile' `
 # module's session state, which is not where anyone types.
 Check 'the alias target is exported too' 'Function' `
     (Get-Command Invoke-CpProfile -ErrorAction SilentlyContinue).CommandType
+
+Remove-Module agent-profile -Force
+Import-Module (Join-Path $selfDir 'claude-profile.psm1') -Force
+Check 'legacy module exports claude' 'Function' `
+    (Get-Command claude -ErrorAction SilentlyContinue).CommandType
+Check 'legacy module exports agent-profile' 'Alias' `
+    (Get-Command agent-profile -ErrorAction SilentlyContinue).CommandType
+Remove-Module claude-profile -Force
+Import-Module (Join-Path $selfDir 'agent-profile.psm1') -Force
+$mod = Get-Module agent-profile
 
 # --- scratch -----------------------------------------------------------------
 
@@ -162,7 +172,7 @@ try {
     if (-not $bash) {
         Write-Host "SKIP drift guard: no Git Bash found"
     } else {
-        $shPath    = & $mod { ConvertTo-CpPosixPath $args[0] } (Join-Path $selfDir 'claude-profile.sh')
+        $shPath    = & $mod { ConvertTo-CpPosixPath $args[0] } (Join-Path $selfDir 'agent-profile.sh')
         $storeSh   = & $mod { ConvertTo-CpPosixPath $args[0] } $store
         $homeSh    = & $mod { ConvertTo-CpPosixPath $args[0] } $fakeHome
 

@@ -1,6 +1,6 @@
 # Commands that read or set the active profile, and launching claude.
 #
-# Sourced by ../claude-profile.sh. Not standalone: no shebang, no set -e,
+# Sourced by ../agent-profile.sh. Not standalone: no shebang, no set -e,
 # and it assumes the other lib files are loaded (shell resolves function
 # references at call time, so load order does not matter).
 

@@ -1,4 +1,4 @@
-# Add the Import-Module line for claude-profile.psm1 to your PowerShell profile,
+# Add the Import-Module line for agent-profile.psm1 to your PowerShell profile,
 # then prove it worked. Safe to re-run: an install that is already correct is a
 # no-op. The PowerShell counterpart of install.sh, and it exists for the same
 # reason -- without that line there is no `claude-profile` command to manage
@@ -8,7 +8,7 @@
 #
 # Usage: .\install.ps1 [-ProfilePath <path>] [-Help]
 #
-# ASCII only, for the reason given at the top of claude-profile.psm1.
+# ASCII only, for the reason given at the top of agent-profile.psm1.
 
 param(
     [string] $ProfilePath,
@@ -31,8 +31,9 @@ Import-Module line, and checks that a fresh PowerShell picks it up.
 }
 
 $selfDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$module  = Join-Path $selfDir 'claude-profile.psm1'
-$shim    = Join-Path $selfDir 'claude-profile.sh'
+$module  = Join-Path $selfDir 'agent-profile.psm1'
+$shim    = Join-Path $selfDir 'agent-profile.sh'
+$legacyModule = Join-Path $selfDir 'claude-profile.psm1'
 
 function Say  { param([string]$m) Write-Host $m }
 function Warn { param([string]$m) [Console]::Error.WriteLine($m) }
@@ -46,6 +47,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $selfDir 'lib'))) {
 # Single-quoted so nothing in the path is expanded at profile-load time; a quote
 # inside the path is escaped the PowerShell way, by doubling it.
 $line = "Import-Module '" + ($module -replace "'", "''") + "'"
+$legacyLine = "Import-Module '" + ($legacyModule -replace "'", "''") + "'"
 
 $target = if ($ProfilePath) { $ProfilePath } else { $PROFILE }
 $explicit = [bool]$ProfilePath
@@ -64,18 +66,22 @@ if (Test-Path -LiteralPath $target -PathType Leaf) {
     $existingText = [IO.File]::ReadAllText($target)
 }
 
-if ($existingText -match 'claude-profile\.psm1') {
+if ($existingText -match '(agent|claude)-profile\.psm1') {
     $hasExact = $false
+    $hasLegacyExact = $false
     foreach ($l in ($existingText -split "`r?`n")) {
         if ($l.Trim() -eq $line) { $hasExact = $true; break }
+        if ($l.Trim() -eq $legacyLine) { $hasLegacyExact = $true }
     }
     if ($hasExact) {
         Say "already installed in $target"
+    } elseif ($hasLegacyExact) {
+        Say "already installed through the compatibility module in $target"
     } else {
-        Warn "install: $target already refers to claude-profile.psm1, but not the"
+        Warn "install: $target already refers to a profile module, but not the"
         Warn "way this script would write it:"
         foreach ($l in ($existingText -split "`r?`n")) {
-            if ($l -match 'claude-profile\.psm1') { Warn "    $l" }
+            if ($l -match '(agent|claude)-profile\.psm1') { Warn "    $l" }
         }
         Warn ""
         Warn "Expected:"
@@ -114,7 +120,7 @@ if ($effective -in @('Restricted', 'AllSigned')) {
     Warn ""
 }
 
-# Management subcommands shell out to claude-profile.sh. Resolution and launching
+# Management subcommands shell out to agent-profile.sh. Resolution and launching
 # do not, so a missing Git Bash is a partial install, not a broken one -- say so
 # now rather than at the first --create.
 $bash = $null

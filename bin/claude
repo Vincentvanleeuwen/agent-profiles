@@ -8,6 +8,6 @@
 # a subcommand of this would only be a second name for it.
 set -u
 
-_cp_entry="$(dirname "$0")/../claude-profile.sh"
+_cp_entry="$(dirname "$0")/../agent-profile.sh"
 
 exec "$_cp_entry" --run-active "$@"

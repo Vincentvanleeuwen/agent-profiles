@@ -1,5 +1,5 @@
 # The lib/ files and test.sh are sourced, not executed, so there is no shebang
-# to infer a dialect from. claude-profile.sh and install.sh do have one, and it
+# to infer a dialect from. agent-profile.sh and install.sh do have one, and it
 # agrees with this.
 shell=sh
 
@@ -19,6 +19,6 @@ disable=SC1090  # "can't follow non-constant source" — the `for _cp_f in ...` 
 
 # BASH_SOURCE with a ${(%):-%x} zsh fallback is the deliberate dual-shell way to
 # find our own path; only one branch is ever expanded per shell. See the comment
-# at the top of claude-profile.sh.
+# at the top of agent-profile.sh.
 disable=SC3028  # "BASH_SOURCE is undefined in POSIX sh"
 disable=SC2296  # "parameter expansions can't start with (" — the zsh half

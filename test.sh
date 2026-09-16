@@ -1,5 +1,5 @@
 #!/bin/sh
-# Test harness for claude-profile.sh
+# Test harness for agent-profile.sh
 # Runs against a temporary store and a temporary fake home.
 
 fails=0
@@ -67,7 +67,7 @@ CLAUDE_PROFILES_DIR="$TMP/store"
 export CLAUDE_PROFILES_DIR
 mkdir -p "$CLAUDE_PROFILES_DIR"
 
-. "$HERE/claude-profile.sh"
+. "$HERE/agent-profile.sh"
 _cp_test_runner() { printf 'CFG=%s ARGS=%s\n' "$CLAUDE_CONFIG_DIR" "$*"; }
 
 echo "== Task 1: resolution =="
@@ -666,17 +666,17 @@ check "no nesting inside first backup" '[ ! -d "$bk1/colla" ]'
 
 echo "== Task 10: portability and help =="
 
-check_with "parses under dash" dash 'dash -n "$HERE/claude-profile.sh"'
-check "parses under bash"  'bash -n "$HERE/claude-profile.sh"'
-check_with "parses under zsh" zsh 'zsh -n "$HERE/claude-profile.sh"'
+check_with "parses under dash" dash 'dash -n "$HERE/agent-profile.sh" && dash -n "$HERE/claude-profile.sh"'
+check "parses under bash"  'bash -n "$HERE/agent-profile.sh" && bash -n "$HERE/claude-profile.sh"'
+check_with "parses under zsh" zsh 'zsh -n "$HERE/agent-profile.sh" && zsh -n "$HERE/claude-profile.sh"'
 # Suppressions and shell= live in .shellcheckrc, so this stays a bare invocation.
 check_with "passes shellcheck" shellcheck \
-  'shellcheck "$HERE/claude-profile.sh" "$HERE/install.sh" "$HERE"/lib/*.sh "$HERE/test.sh" "$HERE/bin/claude"'
+  'shellcheck "$HERE/agent-profile.sh" "$HERE/claude-profile.sh" "$HERE/install.sh" "$HERE"/lib/*.sh "$HERE/test.sh" "$HERE/bin/claude"'
 # Excludes POSIX character classes like [[:space:]] ("[[" followed by ":"),
 # which are legitimate sh and not the bash [[ ]] test bashism.
-check "no bashisms: no [[" '! grep -qE "\[\[[^:]" "$HERE/claude-profile.sh"'
-check "no bashisms: no arrays" '! grep -qE "^[[:space:]]*[A-Za-z_]+=\(" "$HERE/claude-profile.sh"'
-check "no hardcoded home"  '! grep -q "/Users/" "$HERE/claude-profile.sh"'
+check "no bashisms: no [[" '! grep -qE "\[\[[^:]" "$HERE/agent-profile.sh"'
+check "no bashisms: no arrays" '! grep -qE "^[[:space:]]*[A-Za-z_]+=\(" "$HERE/agent-profile.sh"'
+check "no hardcoded home"  '! grep -q "/Users/" "$HERE/agent-profile.sh"'
 
 check "help lists create" '_cp_main --help | grep -q -- "--create"'
 check "help lists export" '_cp_main --help | grep -q -- "--export"'
@@ -889,10 +889,33 @@ rm -rf "$TMP/ps"
 
 echo "== Task 16: running without sourcing, and install.sh =="
 
+check "canonical POSIX entry exists" '[ -x "$HERE/agent-profile.sh" ]'
+check "canonical POSIX entry executes" \
+   'env HOME="$FAKEHOME" CLAUDE_PROFILES_DIR="$TMP/store" "$HERE/agent-profile.sh" --help |
+    grep -q -- "--create"'
+check "legacy POSIX entry still executes" \
+   'env HOME="$FAKEHOME" CLAUDE_PROFILES_DIR="$TMP/store" "$HERE/claude-profile.sh" --help |
+    grep -q -- "--create"'
+check "legacy POSIX entry still sources under bash" \
+   'bash -c '\'' . "$1"; [ "$(type -t agent-profile)" = function ] && [ "$(type -t claude)" = function ]'\'' \
+         _ "$HERE/claude-profile.sh"'
+check_with "legacy POSIX entry still sources under zsh" zsh \
+   'zsh -c '\'' . "$1"; [ "$(whence -w agent-profile)" = "agent-profile: function" ] &&
+                          [ "$(whence -w claude)" = "claude: function" ]'\'' \
+        _ "$HERE/claude-profile.sh"'
+ln -s "$HERE/claude-profile.sh" "$TMP/legacy-profile-link"
+check "legacy POSIX symlink still executes" \
+   'env HOME="$FAKEHOME" CLAUDE_PROFILES_DIR="$TMP/store" "$TMP/legacy-profile-link" --help |
+    grep -q -- "--create"'
+check "legacy POSIX symlink still sources" \
+   'bash -c '\'' . "$1"; [ "$(type -t agent-profile)" = function ]'\'' _ "$TMP/legacy-profile-link"'
+check "canonical PowerShell module exists" '[ -f "$HERE/agent-profile.psm1" ]'
+check "legacy PowerShell module remains" '[ -f "$HERE/claude-profile.psm1" ]'
+
 # The entry script has to work executed as well as sourced, so that a fresh
 # clone does something useful before anything touches a shell rc. These run it
 # as a subprocess, which is the only honest way to test the executed path.
-CPX="$HERE/claude-profile.sh"
+CPX="$HERE/agent-profile.sh"
 XENV="HOME=$FAKEHOME CLAUDE_PROFILES_DIR=$TMP/xstore"
 mkdir -p "$TMP/xstore"
 
@@ -959,7 +982,7 @@ check "sourcing with args does not dispatch" \
    'bash -c "cd \"$TMP\" && set -- --create LEAK && . \"$CPX\"" >/dev/null 2>&1 &&
     [ ! -d "$TMP/xstore/profiles/LEAK" ]'
 check_with "sourcing under dash does not dispatch" dash \
-   'dash -c "cd \"$HERE\" && . ./claude-profile.sh" >/dev/null 2>&1;
+   'dash -c "cd \"$HERE\" && . ./agent-profile.sh" >/dev/null 2>&1;
     [ ! -d "$TMP/xstore/profiles/dash" ]'
 
 # CRLF is the specific way this breaks: a "#!/bin/sh\r" shebang is a fatal
@@ -982,12 +1005,21 @@ IRC="$TMP/fakerc"
 : > "$IRC"
 IRC_ENV="HOME=$IH_IRC CP_RC=$IRC CLAUDE_PROFILE_INSTALL_DIR=$TMP/irc-install CP_LINK_DIR=$TMP/irc-install/.local/bin CP_ZSHENV=$TMP/irc-install/.zshenv"
 check "install writes the source line" \
-   'env $IRC_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1 && grep -qF "claude-profile.sh" "$IRC"'
+   'env $IRC_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1 && grep -qF "agent-profile.sh" "$IRC"'
 # shellcheck disable=SC2086 # IRC_ENV is a list of VAR=val words, splitting is the point
 env $IRC_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1
 # shellcheck disable=SC2086 # IRC_ENV is a list of VAR=val words, splitting is the point
 env $IRC_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1
-eq "install is idempotent" "$(grep -c 'claude-profile\.sh' "$IRC")" "1"
+eq "install is idempotent" "$(grep -c 'agent-profile\.sh' "$IRC")" "1"
+
+printf '. "%s/agent-profile.sh"\nsource /deleted/clone/claude-profile.sh\n' \
+       "$TMP/irc-install" > "$IRC"
+# shellcheck disable=SC2086 # IRC_ENV is a list of VAR=val words, splitting is the point
+env $IRC_ENV "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
+eq "install collapses canonical and legacy source lines" \
+   "$(grep -Ec '^[[:space:]]*(\.|source)[[:space:]].*(agent|claude)-profile\.sh' "$IRC")" "1"
+check "collapsed source line is canonical" \
+   'grep -qxF ". \"$TMP/irc-install/agent-profile.sh\"" "$IRC"'
 
 # Both PATH surfaces are asserted against a throwaway HOME here, not trusted
 # to the docs. --no-migrate is required: SELF_DIR is $HERE, this real checkout.
@@ -997,7 +1029,8 @@ env HOME="$IH_STABLE" SHELL=/bin/zsh CP_RC="$IH_STABLE/.zshrc" CP_ZSHENV="$IH_ST
     CP_LINK_DIR="$IH_STABLE/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH_STABLE/.claude-profile" \
     sh "$HERE/install.sh" --from-npm --no-migrate >"$TMP/stableout" 2>&1
 eq "install --from-npm succeeds" "$?" "0"
-check "code landed in the install dir" '[ -f "$IH_STABLE/.claude-profile/claude-profile.sh" ] &&
+check "code landed in the install dir" '[ -f "$IH_STABLE/.claude-profile/agent-profile.sh" ] &&
+                                        [ -f "$IH_STABLE/.claude-profile/claude-profile.sh" ] &&
                                         [ -d "$IH_STABLE/.claude-profile/lib" ]'
 check "primary command is on PATH" '[ -L "$IH_STABLE/.local/bin/agent-profile" ]'
 check "primary command actually runs" 'env HOME="$IH_STABLE" "$IH_STABLE/.local/bin/agent-profile" --help |
@@ -1008,13 +1041,13 @@ check "zshenv prepends the bin dir" \
    'grep -qF "$IH_STABLE/.claude-profile/bin" "$IH_STABLE/.zshenv"'
 check "zshenv guards against a double prepend" 'grep -q "case \":\$PATH:\"" "$IH_STABLE/.zshenv"'
 check "rc points at the install dir" \
-   'grep -qF "$IH_STABLE/.claude-profile/claude-profile.sh" "$IH_STABLE/.zshrc"'
+   'grep -qF "$IH_STABLE/.claude-profile/agent-profile.sh" "$IH_STABLE/.zshrc"'
 check "--from-npm prints the migrate hint" 'grep -q -- "--migrate-store" "$TMP/stableout"'
 
 env HOME="$IH_STABLE" SHELL=/bin/zsh CP_RC="$IH_STABLE/.zshrc" CP_ZSHENV="$IH_STABLE/.zshenv" \
     CP_LINK_DIR="$IH_STABLE/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH_STABLE/.claude-profile" \
     sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
-eq "install is idempotent in the rc"     "$(grep -c 'claude-profile\.sh' "$IH_STABLE/.zshrc")" "1"
+eq "install is idempotent in the rc"     "$(grep -c 'agent-profile\.sh' "$IH_STABLE/.zshrc")" "1"
 eq "install is idempotent in the zshenv" "$(grep -c 'claude-profile/bin' "$IH_STABLE/.zshenv")" "1"
 
 IH_RENAME="$TMP/ihome-rename"
@@ -1041,12 +1074,13 @@ eq "install migrates legacy default paths" "$?" "0"
 check "legacy store moved to the agent path" \
    '[ -d "$IH_RENAME/.agent-profiles/profiles/keepme" ] && [ ! -e "$IH_RENAME/.claude-profiles" ]'
 check "legacy install moved to the agent path" \
-   '[ -f "$IH_RENAME/.agent-profile/claude-profile.sh" ] && [ ! -e "$IH_RENAME/.claude-profile" ]'
+   '[ -f "$IH_RENAME/.agent-profile/agent-profile.sh" ] &&
+    [ -f "$IH_RENAME/.agent-profile/claude-profile.sh" ] && [ ! -e "$IH_RENAME/.claude-profile" ]'
 check "legacy install keeps unrecognised files" '[ -f "$IH_RENAME/.agent-profile/bin/keep" ]'
 eq "legacy migration retargets Codex" "$(readlink "$IH_RENAME/.codex/config.toml")" \
    "$IH_RENAME/.agent-profiles/profiles/keepme/codex.config.toml"
 check "legacy migration rewrites shell paths" \
-   'grep -qF "$IH_RENAME/.agent-profile/claude-profile.sh" "$IH_RENAME/.zshrc" &&
+   'grep -qF "$IH_RENAME/.agent-profile/agent-profile.sh" "$IH_RENAME/.zshrc" &&
     grep -qF "$IH_RENAME/.agent-profile/bin" "$IH_RENAME/.zshenv" &&
     ! grep -qF "$IH_RENAME/.claude-profile/bin" "$IH_RENAME/.zshenv"'
 
@@ -1164,9 +1198,9 @@ env HOME="$IH_OLDLINE" SHELL=/bin/zsh CP_RC="$IH_OLDLINE/.zshrc" CP_ZSHENV="$IH_
     CP_LINK_DIR="$IH_OLDLINE/.local/bin" CLAUDE_PROFILE_INSTALL_DIR="$IH_OLDLINE/.claude-profile" \
     sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
 eq "install rewrites a clone-pointing rc line" "$?" "0"
-eq "only one source line remains" "$(grep -c 'claude-profile\.sh' "$IH_OLDLINE/.zshrc")" "1"
+eq "only one source line remains" "$(grep -c 'agent-profile\.sh' "$IH_OLDLINE/.zshrc")" "1"
 check "the remaining line points at the install dir" \
-   'grep -qF "$IH_OLDLINE/.claude-profile/claude-profile.sh" "$IH_OLDLINE/.zshrc"'
+   'grep -qF "$IH_OLDLINE/.claude-profile/agent-profile.sh" "$IH_OLDLINE/.zshrc"'
 
 IH_NOSHIM="$TMP/ihome-noshim"
 mkdir -p "$IH_NOSHIM"
@@ -1183,7 +1217,7 @@ check "--no-shim skips the zshenv" '[ ! -f "$IH_NOSHIM/.zshenv" ] ||
 IH_MIGRATE="$TMP/ihome-migrate"
 CLONE="$TMP/oldclone"
 mkdir -p "$IH_MIGRATE" "$CLONE/profiles/legacyprof"
-cp "$HERE/claude-profile.sh" "$HERE/install.sh" "$CLONE/"
+cp "$HERE/agent-profile.sh" "$HERE/claude-profile.sh" "$HERE/install.sh" "$CLONE/"
 cp -R "$HERE/lib" "$HERE/bin" "$CLONE/"
 printf '{ "x": "%s/profiles/legacyprof/statusline.sh" }\n' "$CLONE" \
     > "$CLONE/profiles/legacyprof/settings.json"
@@ -1205,7 +1239,7 @@ check "migrated settings were rewritten" \
 IH4B="$TMP/ihome-migrate-norewrite"
 CLONEB="$TMP/oldclone-norewrite"
 mkdir -p "$IH4B" "$CLONEB/profiles/legacyprof"
-cp "$HERE/claude-profile.sh" "$HERE/install.sh" "$CLONEB/"
+cp "$HERE/agent-profile.sh" "$HERE/claude-profile.sh" "$HERE/install.sh" "$CLONEB/"
 cp -R "$HERE/lib" "$HERE/bin" "$CLONEB/"
 printf 'just some notes\n' > "$CLONEB/profiles/legacyprof/CLAUDE.md"
 env HOME="$IH4B" SHELL=/bin/zsh CP_RC="$IH4B/.zshrc" CP_ZSHENV="$IH4B/.zshenv" \
@@ -1229,9 +1263,9 @@ printf 'source ~/elsewhere/claude-profile.sh\n' > "$TMP/conflictrc"
 env $CONFLICT_ENV "$HERE/install.sh" --no-migrate >/dev/null 2>&1
 eq "install rewrites a line pointing at another clone" "$?" "0"
 check "the rewritten line points at the install dir" \
-   'grep -qxF ". \"$TMP/conflict-install/claude-profile.sh\"" "$TMP/conflictrc"'
+   'grep -qxF ". \"$TMP/conflict-install/agent-profile.sh\"" "$TMP/conflictrc"'
 eq "the rewrite left exactly one source line" \
-   "$(grep -c 'claude-profile\.sh' "$TMP/conflictrc")" "1"
+   "$(grep -c 'agent-profile\.sh' "$TMP/conflictrc")" "1"
 
 # A commented-out mention is not a source line this script can repoint --
 # stop and say so by hand, rather than duplicate or guess.
@@ -1254,12 +1288,12 @@ eq "install left the commented-out rc alone" \
 IH="$TMP/ihome"; mkdir -p "$IH"; : > "$IH/.bashrc"
 check "install works when \$SHELL is /bin/sh" \
    'env HOME="$IH" SHELL=/bin/sh bash "$HERE/install.sh" --no-migrate >/dev/null 2>&1 &&
-    grep -qF "claude-profile.sh" "$IH/.bashrc"'
+    grep -qF "agent-profile.sh" "$IH/.bashrc"'
 
 IH2="$TMP/ihome2"; mkdir -p "$IH2"; : > "$IH2/.zshrc"
 check "install picks .zshrc for a zsh login shell" \
    'env HOME="$IH2" SHELL=/bin/zsh sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1 &&
-    grep -qF "claude-profile.sh" "$IH2/.zshrc"'
+    grep -qF "agent-profile.sh" "$IH2/.zshrc"'
 
 # A named shell with no rc yet is a fresh account, not an ambiguity.
 IH3="$TMP/ihome3"; mkdir -p "$IH3"
@@ -1296,7 +1330,7 @@ check_with "a login shell reaches the wrapper" bash \
 # answer for it — reproduce the failure, or the check is only decoration.
 IHCP="$TMP/ihome-cp"; mkdir -p "$IHCP"; : > "$IHCP/.bashrc"
 CPSTUB="$TMP/cpstub"; mkdir -p "$CPSTUB/lib" "$CPSTUB/bin"
-printf 'claude() { :; }\n' > "$CPSTUB/claude-profile.sh"
+printf 'claude() { :; }\n' > "$CPSTUB/agent-profile.sh"
 : > "$CPSTUB/bin/claude"
 cp "$HERE/install.sh" "$CPSTUB/install.sh"
 env HOME="$IHCP" SHELL=/bin/bash PATH="/usr/bin:/bin" \
@@ -1357,11 +1391,11 @@ check "an explicit --rc does not claim reachability" \
 check "install honours --shell" \
    'env HOME="$TMP/ihome5" sh -c "mkdir -p \"$TMP/ihome5\"" &&
     env HOME="$TMP/ihome5" SHELL=/bin/sh sh "$HERE/install.sh" --shell bash --no-migrate >/dev/null 2>&1 &&
-    grep -qF "claude-profile.sh" "$TMP/ihome5/.bashrc"'
+    grep -qF "agent-profile.sh" "$TMP/ihome5/.bashrc"'
 check "install honours --rc" \
    'env HOME="$TMP/ihome6" sh -c "mkdir -p \"$TMP/ihome6\"" &&
     env HOME="$TMP/ihome6" sh "$HERE/install.sh" --rc "$TMP/ihome6rc" --no-migrate >/dev/null 2>&1 &&
-    grep -qF "claude-profile.sh" "$TMP/ihome6rc"'
+    grep -qF "agent-profile.sh" "$TMP/ihome6rc"'
 
 "$HERE/install.sh" --no-migrate --help >/dev/null 2>&1
 eq "install --help exits 0" "$?" "0"
@@ -1443,7 +1477,7 @@ echo "# reminder: claude-profile.sh lives in ~/.claude-profile" >> "$IH14/.zshrc
 env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >/dev/null 2>&1
 eq "uninstall (user comment) succeeds" "$?" "0"
 check "user comment survives" 'grep -qF "reminder: claude-profile.sh" "$IH14/.zshrc"'
-check "real source line gone" '! grep -qE "^[[:space:]]*(\.|source)[[:space:]].*claude-profile\.sh" "$IH14/.zshrc"'
+check "real source line gone" '! grep -qE "^[[:space:]]*(\.|source)[[:space:]].*(agent|claude)-profile\.sh" "$IH14/.zshrc"'
 
 # --uninstall must fully reverse .zshenv even when CLAUDE_PROFILE_INSTALL_DIR's
 # name has no "claude-profile" substring for a plain grep to latch onto.
@@ -1486,9 +1520,9 @@ env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >/dev/null 2>&1
 env $UENV sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
 eq "install after uninstall after install succeeds" "$?" "0"
 check "reinstalled code landed in the install dir" \
-   '[ -f "$IH16/.claude-profile/claude-profile.sh" ]'
+   '[ -f "$IH16/.claude-profile/agent-profile.sh" ]'
 eq "reinstall has exactly one rc source line" \
-   "$(grep -c 'claude-profile\.sh' "$IH16/.zshrc")" "1"
+   "$(grep -c 'agent-profile\.sh' "$IH16/.zshrc")" "1"
 eq "reinstall has exactly one zshenv PATH block" \
    "$(grep -c 'claude-profile/bin' "$IH16/.zshenv")" "1"
 check "reinstalled symlink resolves" \
@@ -1699,10 +1733,10 @@ printf 'shimprof\n' > "$TMP/xstore/active"
 check "bin/claude-profile is a symlink" '[ -L "$HERE/bin/claude-profile" ]'
 check "bin/agent-profile is a symlink" '[ -L "$HERE/bin/agent-profile" ]'
 # Assert the link text, not a dereferenced path: _cp_deref resolves a relative
-# link against its own directory, so it returns "<repo>/bin/../claude-profile.sh"
-# -- correct, and never string-equal to "<repo>/claude-profile.sh".
+# link against its own directory, so it returns "<repo>/bin/../agent-profile.sh"
+# -- correct, and never string-equal to "<repo>/agent-profile.sh".
 eq "bin/claude-profile points at the entry script" \
-   "$(readlink "$HERE/bin/claude-profile")" "../claude-profile.sh"
+   "$(readlink "$HERE/bin/claude-profile")" "../agent-profile.sh"
 check "symlinked entry still finds lib" \
    'env $XENV "$HERE/bin/claude-profile" | grep -q "^store: "'
 check "primary symlinked entry still finds lib" \
@@ -1738,7 +1772,7 @@ check_with "package.json is valid JSON" node \
 check_with "package ships the code, not the store" node \
    'node -e "
       const f = JSON.parse(require(\"fs\").readFileSync(\"$HERE/package.json\",\"utf8\")).files;
-      const need = [\"claude-profile.sh\",\"lib\",\"bin\",\"claude-profile.psm1\",\"install.sh\",\"install.ps1\"];
+      const need = [\"agent-profile.sh\",\"agent-profile.psm1\",\"claude-profile.sh\",\"claude-profile.psm1\",\"lib\",\"bin\",\"install.sh\",\"install.ps1\"];
       for (const n of need) if (!f.includes(n)) { console.error(\"missing \"+n); process.exit(1); }
       for (const n of [\"profiles\",\"exports\",\".backups\"]) if (f.includes(n)) { console.error(\"ships \"+n); process.exit(1); }
    "'
@@ -1757,6 +1791,7 @@ check_with "dispatcher runs the POSIX installer" node \
         CP_LINK_DIR="$TMP/npmhome/.local/bin" \
         CLAUDE_PROFILE_INSTALL_DIR="$TMP/npmhome/.claude-profile" SHELL=/bin/zsh \
         node "$HERE/scripts/postinstall.mjs" --no-migrate >/dev/null 2>&1 &&
+    [ -f "$TMP/npmhome/.claude-profile/agent-profile.sh" ] &&
     [ -f "$TMP/npmhome/.claude-profile/claude-profile.sh" ] &&
     [ -L "$TMP/npmhome/.claude-profile/bin/claude-profile" ] &&
     [ -L "$TMP/npmhome/.local/bin/claude-profile" ] && [ -e "$TMP/npmhome/.local/bin/claude-profile" ]'
@@ -1765,7 +1800,8 @@ check_with "dispatcher runs the POSIX installer" node \
 # tree lacks bin/claude-profile — reproduce that, or the test proves nothing.
 SRC="$TMP/npmsrc"
 mkdir -p "$SRC"
-cp "$HERE/claude-profile.sh" "$HERE/install.sh" "$SRC/"
+cp "$HERE/agent-profile.sh" "$HERE/claude-profile.sh" "$HERE/agent-profile.psm1" \
+   "$HERE/claude-profile.psm1" "$HERE/install.sh" "$SRC/"
 cp -R "$HERE/lib" "$HERE/bin" "$HERE/scripts" "$SRC/"
 rm -f "$SRC/bin/claude-profile"
 mkdir -p "$TMP/npmhome2"
@@ -1775,6 +1811,7 @@ check_with "dispatcher repairs a symlink-stripped npm source" node \
         CP_LINK_DIR="$TMP/npmhome2/.local/bin" \
         CLAUDE_PROFILE_INSTALL_DIR="$TMP/npmhome2/.claude-profile" SHELL=/bin/zsh \
         node "$TMP/npmsrc/scripts/postinstall.mjs" --no-migrate >/dev/null 2>&1 &&
+    [ -f "$TMP/npmhome2/.claude-profile/agent-profile.sh" ] &&
     [ -f "$TMP/npmhome2/.claude-profile/claude-profile.sh" ] &&
     [ -L "$TMP/npmhome2/.claude-profile/bin/claude-profile" ] &&
     [ -L "$TMP/npmhome2/.local/bin/claude-profile" ] && [ -e "$TMP/npmhome2/.local/bin/claude-profile" ]'

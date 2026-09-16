@@ -2,7 +2,7 @@
 # config as an absolute path has to move with it, or every hook silently stops
 # firing.
 #
-# Sourced by ../claude-profile.sh. Not standalone: no shebang, no set -e.
+# Sourced by ../agent-profile.sh. Not standalone: no shebang, no set -e.
 
 _CP_MIGRATE_ENTRIES="profiles active exports .backups prompt-state.json codex-default.config.toml"
 
