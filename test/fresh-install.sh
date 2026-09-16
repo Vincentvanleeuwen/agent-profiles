@@ -24,9 +24,10 @@ FAKE_HOME="$TMP_ROOT/home"
 STORE="$FAKE_HOME/.agent-profiles"
 INSTALL="$FAKE_HOME/.agent-profile"
 PREFIX="$TMP_ROOT/npm-prefix"
-mkdir -p "$FAKE_HOME/.claude" "$FAKE_HOME/.codex" "$PREFIX"
+mkdir -p "$FAKE_HOME/.claude" "$FAKE_HOME/.codex" "$FAKE_HOME/.gemini" "$PREFIX"
 printf '{"model":"default-marker"}\n' > "$FAKE_HOME/.claude/settings.json"
 printf 'model = "default-marker"\n' > "$FAKE_HOME/.codex/config.toml"
+printf '{"theme":"default-marker"}\n' > "$FAKE_HOME/.gemini/settings.json"
 
 run_env() {
     env HOME="$FAKE_HOME" CLAUDE_PROFILES_DIR="$STORE" \
@@ -41,9 +42,11 @@ run_env agent-profile --create fresh
 run_env agent-profile fresh
 [ "$(cat "$STORE/active")" = fresh ]
 [ "$(readlink "$FAKE_HOME/.codex/config.toml")" = "$STORE/profiles/fresh/codex.config.toml" ]
+[ "$(readlink "$FAKE_HOME/.gemini/settings.json")" = "$STORE/profiles/fresh/gemini.settings.json" ]
 run_env agent-profile default
 [ ! -e "$STORE/active" ]
 grep -q 'default-marker' "$FAKE_HOME/.codex/config.toml"
+grep -q 'default-marker' "$FAKE_HOME/.gemini/settings.json"
 run_env agent-profile-install --uninstall
 [ ! -e "$INSTALL" ]
 [ -d "$STORE/profiles/fresh" ]

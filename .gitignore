@@ -8,5 +8,7 @@ active
 docs/superpowers/
 prompt-state.json
 codex-default.config.toml
+gemini-default.settings.json
 codex-default.config.toml.tmp.*
+gemini-default.settings.json.tmp.*
 graphify-out/

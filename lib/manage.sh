@@ -42,6 +42,10 @@ _cp_cmd_update() {
         printf 'claude-profile: failed to snapshot Codex config for "%s"; previous contents at %s\n' "$_n" "$_bk" >&2
         return 1
     fi
+    if ! _cp_gemini_snapshot "$_n"; then
+        printf 'claude-profile: failed to snapshot Gemini settings for "%s"; previous contents at %s\n' "$_n" "$_bk" >&2
+        return 1
+    fi
     printf 'backed up -> %s\n' "$_bk"
     printf 'updated %s <- %s\n' "$_n" "$_from"
 }
@@ -72,12 +76,16 @@ _cp_cmd_reset() {
         return 1
     fi
     rmdir "$_empty"
-    if ! _cp_codex_prepare_default || ! _cp_codex_copy "$(_cp_codex_default)" "$(_cp_codex_profile "$_n")"; then
+    if ! _cp_codex_prepare_default || ! _cp_file_copy "$(_cp_codex_default)" "$(_cp_codex_profile "$_n")"; then
         printf 'claude-profile: failed to reset Codex config for "%s"; previous contents at %s\n' "$_n" "$_bk" >&2
         return 1
     fi
+    if ! _cp_gemini_prepare_default || ! _cp_file_copy "$(_cp_gemini_default)" "$(_cp_gemini_profile "$_n")"; then
+        printf 'claude-profile: failed to reset Gemini settings for "%s"; previous contents at %s\n' "$_n" "$_bk" >&2
+        return 1
+    fi
     if [ "$(_cp_read_name "$(_cp_store)/active" 2>/dev/null)" = "$_n" ]; then
-        _cp_codex_activate "$_n" || return 1
+        _cp_clients_activate "$_n" || return 1
     fi
     printf 'backed up -> %s\n' "$_bk"
     printf 'reset %s (fresh config; shared paths still linked to base)\n' "$_n"
@@ -104,11 +112,11 @@ _cp_cmd_delete() {
             printf 'claude-profile: could not remove %s/active; deletion rolled back\n' "$(_cp_store)" >&2
             return 1
         fi
-        if ! _cp_codex_activate_default; then
+        if ! _cp_clients_activate_default; then
             mv "$_bk" "$(_cp_dir "$_n")"
             printf '%s\n' "$_n" > "$(_cp_store)/active"
-            _cp_codex_activate "$_n" >/dev/null 2>&1
-            printf 'claude-profile: could not restore the default Codex config; deletion rolled back\n' >&2
+            _cp_clients_activate "$_n" >/dev/null 2>&1
+            printf 'claude-profile: could not restore the default client settings; deletion rolled back\n' >&2
             return 1
         fi
     fi
@@ -137,12 +145,12 @@ _cp_cmd_rename() {
             printf 'claude-profile: could not write %s/active; rename rolled back\n' "$(_cp_store)" >&2
             return 1
         fi
-        if ! _cp_codex_activate "$_n"; then
+        if ! _cp_clients_activate "$_n"; then
             _cp_rewrite "$(_cp_dir "$_n")/settings.json" "$(_cp_dir "$_o")" "$(_cp_dir "$_n")" >/dev/null 2>&1
             mv "$(_cp_dir "$_n")" "$(_cp_dir "$_o")"
             printf '%s\n' "$_o" > "$(_cp_store)/active"
-            _cp_codex_activate "$_o" >/dev/null 2>&1
-            printf 'claude-profile: could not activate Codex config for "%s"; rename rolled back\n' "$_n" >&2
+            _cp_clients_activate "$_o" >/dev/null 2>&1
+            printf 'claude-profile: could not activate client settings for "%s"; rename rolled back\n' "$_n" >&2
             return 1
         fi
     fi
@@ -154,6 +162,7 @@ _cp_cmd_copy() {
     _cp_need "$_s" || return 1
     _cp_free "$_n" || return 1
     _cp_codex_ensure "$_s" || return 1
+    _cp_gemini_ensure "$_s" || return 1
     if ! _cp_build "$(_cp_dir "$_s")" "$(_cp_dir "$_n")"; then
         printf 'claude-profile: failed to copy "%s"\n' "$_s" >&2
         rm -rf "$(_cp_dir "$_n")"

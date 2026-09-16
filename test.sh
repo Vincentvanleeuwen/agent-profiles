@@ -29,7 +29,7 @@ mkdir -p "$HERE/profiles"
 FAKEHOME="$TMP/home"
 mkdir -p "$FAKEHOME/.claude/hooks" "$FAKEHOME/.claude/skills/demo" \
          "$FAKEHOME/.claude/plugins/cache" "$FAKEHOME/.claude/projects" \
-         "$FAKEHOME/.codex"
+         "$FAKEHOME/.codex" "$FAKEHOME/.gemini"
 printf 'echo hook\n' > "$FAKEHOME/.claude/hooks/demo.sh"
 printf 'name: demo\n'  > "$FAKEHOME/.claude/skills/demo/SKILL.md"
 printf 'base instructions\n' > "$FAKEHOME/.claude/CLAUDE.md"
@@ -52,7 +52,15 @@ cat > "$FAKEHOME/.claude/settings.json" <<JSON
 }
 JSON
 printf 'printf hud\n' > "$FAKEHOME/.claude/statusline.sh"
-printf 'model = "base"\n' > "$FAKEHOME/.codex/config.toml"
+cat > "$FAKEHOME/.codex/config.toml" <<'TOML'
+model = "base"
+model_provider = "ollama"
+[model_providers.ollama]
+base_url = "http://127.0.0.1:11434/v1"
+wire_api = "responses"
+TOML
+printf '{"theme":"base"}\n' \
+       > "$FAKEHOME/.gemini/settings.json"
 cat > "$FAKEHOME/.claude/.claude.json" <<JSON
 { "mcpServers": { "figma": {}, "atlassian": {} } }
 JSON
@@ -157,6 +165,8 @@ check "create makes profile dir"  '[ -d "$TMP/store/profiles/dev" ]'
 check "create built settings"     '[ -f "$TMP/store/profiles/dev/settings.json" ]'
 check "create snapshots Codex config" \
       'grep -q base "$TMP/store/profiles/dev/codex.config.toml"'
+check "create snapshots Gemini settings" \
+      'grep -q base "$TMP/store/profiles/dev/gemini.settings.json"'
 check "create is not active yet"  '[ ! -f "$TMP/store/active" ]'
 
 _cp_main --create dev >/dev/null 2>&1
@@ -168,9 +178,22 @@ eq "resolve follows it"  "$(_cp_resolve)" "$TMP/store/profiles/dev"
 check "set links Codex config to profile" '[ -L "$FAKEHOME/.codex/config.toml" ]'
 eq "Codex link targets active profile" "$(readlink "$FAKEHOME/.codex/config.toml")" \
    "$TMP/store/profiles/dev/codex.config.toml"
+check "set links Gemini settings to profile" '[ -L "$FAKEHOME/.gemini/settings.json" ]'
+eq "Gemini link targets active profile" "$(readlink "$FAKEHOME/.gemini/settings.json")" \
+   "$TMP/store/profiles/dev/gemini.settings.json"
 check "set preserves default Codex config" \
       'grep -q base "$TMP/store/codex-default.config.toml"'
-printf 'model = "dev"\n' > "$FAKEHOME/.codex/config.toml"
+check "set preserves default Gemini settings" \
+      'grep -q base "$TMP/store/gemini-default.settings.json"'
+cat > "$FAKEHOME/.codex/config.toml" <<'TOML'
+model = "dev"
+model_provider = "lmstudio"
+[model_providers.lmstudio]
+base_url = "http://127.0.0.1:1234/v1"
+wire_api = "responses"
+TOML
+printf '{"theme":"dev"}\n' \
+       > "$FAKEHOME/.gemini/settings.json"
 
 # Creating while a profile is active forks from that profile.
 printf 'dev only\n' > "$TMP/store/profiles/dev/MARKER.md"
@@ -178,19 +201,30 @@ _cp_main --create fin >/dev/null
 check "create forks from active" '[ -f "$TMP/store/profiles/fin/MARKER.md" ]'
 check "create forks the active Codex config" \
       'grep -q dev "$TMP/store/profiles/fin/codex.config.toml"'
+check "create preserves Codex local-provider settings" \
+      'grep -q 1234 "$TMP/store/profiles/fin/codex.config.toml"'
+check "create forks active Gemini settings" \
+      'grep -q dev "$TMP/store/profiles/fin/gemini.settings.json"'
 
 _cp_main default >/dev/null
 check "default clears active" '[ ! -f "$TMP/store/active" ]'
 eq    "default falls back"    "$(_cp_resolve)" "$FAKEHOME/.claude"
 eq "default restores Codex config" "$(readlink "$FAKEHOME/.codex/config.toml")" \
    "$TMP/store/codex-default.config.toml"
+eq "default restores Gemini settings" "$(readlink "$FAKEHOME/.gemini/settings.json")" \
+   "$TMP/store/gemini-default.settings.json"
 check "profile keeps Codex changes" \
       'grep -q dev "$TMP/store/profiles/dev/codex.config.toml"'
+check "profile keeps Gemini changes" \
+      'grep -q dev "$TMP/store/profiles/dev/gemini.settings.json"'
 
 rm -f "$TMP/store/profiles/fin/codex.config.toml"
+rm -f "$TMP/store/profiles/fin/gemini.settings.json"
 _cp_main fin >/dev/null
 check "legacy profile receives default Codex config" \
       'grep -q base "$TMP/store/profiles/fin/codex.config.toml"'
+check "legacy profile receives default Gemini settings" \
+      'grep -q base "$TMP/store/profiles/fin/gemini.settings.json"'
 _cp_main default >/dev/null
 
 ATOM_HOME="$TMP/atom-home"
@@ -218,6 +252,8 @@ check "--reset drops settings.json"    '[ ! -e "$TMP/store/profiles/wipeme/setti
 eq    "--reset relinks shared"         "$(readlink "$TMP/store/profiles/wipeme/plugins")" "$FAKEHOME/.claude/plugins"
 check "--reset restores default Codex config" \
       'grep -q base "$TMP/store/profiles/wipeme/codex.config.toml"'
+check "--reset restores default Gemini settings" \
+      'grep -q base "$TMP/store/profiles/wipeme/gemini.settings.json"'
 check "--reset keeps the Codex link valid" '[ -f "$FAKEHOME/.codex/config.toml" ]'
 check "--reset backed up old copy"     'ls "$TMP/store/.backups" | grep -q "^wipeme-"'
 _CP_YES=1 _cp_main --reset nope >/dev/null 2>&1
@@ -241,6 +277,21 @@ check "status names active"   '_cp_main | grep -q "active: dev"'
 # because the literal word "active:" is always in the format string, not
 # because the source was actually reported. Assert the parenthesised value.
 check "status names source"   '_cp_main | grep -q "(active)"'
+
+ln() {
+    case "$*" in
+        *'/.gemini/'*) return 1 ;;
+        *) command ln "$@" ;;
+    esac
+}
+_cp_main fin >/dev/null 2>&1
+eq "failed Gemini activation exits non-zero" "$?" "1"
+unset -f ln
+eq "failed Gemini activation keeps active marker" "$(cat "$TMP/store/active")" "dev"
+eq "failed Gemini activation restores Codex config" \
+   "$(readlink "$FAKEHOME/.codex/config.toml")" "$TMP/store/profiles/dev/codex.config.toml"
+eq "failed Gemini activation keeps Gemini settings" \
+   "$(readlink "$FAKEHOME/.gemini/settings.json")" "$TMP/store/profiles/dev/gemini.settings.json"
 
 # _cp_valid_name rejection paths reach _cp_cmd_create unfiltered: _cp_main only
 # inspects $1, and --create) shift; _cp_cmd_create "$@" passes the next arg
@@ -596,6 +647,8 @@ printf '{}\n' > "$TMP/store/profiles/legacyexport/settings.json"
 _cp_main --export legacyexport "$TMP/legacyexport.tar.gz" >/dev/null 2>&1
 check "export seeds legacy Codex config" \
       'tar tzf "$TMP/legacyexport.tar.gz" | grep -q "codex.config.toml"'
+check "export seeds legacy Gemini settings" \
+      'tar tzf "$TMP/legacyexport.tar.gz" | grep -q "gemini.settings.json"'
 
 mkdir -p "$TMP/legacyarchive"
 printf '{}\n' > "$TMP/legacyarchive/settings.json"
@@ -603,11 +656,14 @@ printf '{}\n' > "$TMP/legacyarchive/settings.json"
 _cp_main --import "$TMP/legacyarchive.tar.gz" legacyimport >/dev/null
 check "import seeds legacy Codex config" \
       '[ -f "$TMP/store/profiles/legacyimport/codex.config.toml" ]'
+check "import seeds legacy Gemini settings" \
+      '[ -f "$TMP/store/profiles/legacyimport/gemini.settings.json" ]'
 
 _experr=$(_cp_main --export dev "$TMP/dev.tar.gz" 2>&1 >/dev/null)
 check "export wrote archive" '[ -s "$TMP/dev.tar.gz" ]'
 check "archive has settings" 'tar tzf "$TMP/dev.tar.gz" | grep -q "settings.json"'
 check "archive has Codex config" 'tar tzf "$TMP/dev.tar.gz" | grep -q "codex.config.toml"'
+check "archive has Gemini settings" 'tar tzf "$TMP/dev.tar.gz" | grep -q "gemini.settings.json"'
 check "archive has skills"   'tar tzf "$TMP/dev.tar.gz" | grep -q "skills/demo"'
 check "archive omits credentials" '! tar tzf "$TMP/dev.tar.gz" | grep -q "credentials"'
 check "archive omits plugins"     '! tar tzf "$TMP/dev.tar.gz" | grep -q "^plugins"'
@@ -687,6 +743,8 @@ check "README exists"     '[ -f "$HERE/README.md" ]'
 check "README warns about profiles being ignored" 'grep -q "gitignore" "$HERE/README.md"'
 check "gitignore excludes preserved Codex config" \
       'grep -qx "codex-default.config.toml" "$HERE/.gitignore"'
+check "gitignore excludes preserved Gemini settings" \
+      'grep -qx "gemini-default.settings.json" "$HERE/.gitignore"'
 
 echo "== Task 11b: symlinked content =="
 
@@ -1424,11 +1482,16 @@ env $UENV sh "$HERE/install.sh" --from-npm --no-migrate >/dev/null 2>&1
 mkdir -p "$IH12/.claude-profiles/profiles/keepme"
 : > "$IH12/.claude-profiles/profiles/keepme/marker"
 mkdir -p "$IH12/.codex"
+mkdir -p "$IH12/.gemini"
 printf 'model = "default"\n' > "$IH12/.claude-profiles/codex-default.config.toml"
 printf 'model = "profile"\n' > "$IH12/.claude-profiles/profiles/keepme/codex.config.toml"
+printf '{"provider":"default"}\n' > "$IH12/.claude-profiles/gemini-default.settings.json"
+printf '{"provider":"profile"}\n' > "$IH12/.claude-profiles/profiles/keepme/gemini.settings.json"
 printf 'keepme\n' > "$IH12/.claude-profiles/active"
 ln -s "$IH12/.claude-profiles/profiles/keepme/codex.config.toml" \
       "$IH12/.codex/config.toml"
+ln -s "$IH12/.claude-profiles/profiles/keepme/gemini.settings.json" \
+      "$IH12/.gemini/settings.json"
 
 # shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
 env $UENV sh "$HERE/install.sh" --uninstall --no-migrate >"$TMP/uninstout" 2>&1
@@ -1441,6 +1504,8 @@ check "zshenv line removed"       '! grep -q "claude-profile/bin" "$IH12/.zshenv
 check "store left alone"          '[ -f "$IH12/.claude-profiles/profiles/keepme/marker" ]'
 check "uninstall restores original Codex config" \
       '[ ! -L "$IH12/.codex/config.toml" ] && grep -q default "$IH12/.codex/config.toml"'
+check "uninstall restores original Gemini settings" \
+      '[ ! -L "$IH12/.gemini/settings.json" ] && grep -q default "$IH12/.gemini/settings.json"'
 check "uninstall names the store" 'grep -qF "$IH12/.claude-profiles" "$TMP/uninstout"'
 
 # shellcheck disable=SC2086 # $UENV holds space-separated KEY=VALUE pairs for env to split
@@ -1591,7 +1656,7 @@ echo "== Task 18: store migration =="
 LEG="$TMP/legacy"
 NEW="$TMP/newstore"
 MIGRATE_HOME="$TMP/migrate-home"
-mkdir -p "$LEG/profiles/dev/hooks" "$LEG/exports" "$MIGRATE_HOME/.codex"
+mkdir -p "$LEG/profiles/dev/hooks" "$LEG/exports" "$MIGRATE_HOME/.codex" "$MIGRATE_HOME/.gemini"
 printf '{ "statusLine": { "command": "%s/profiles/dev/statusline.sh" } }\n' "$LEG" \
     > "$LEG/profiles/dev/settings.json"
 printf '#!/bin/sh\n%s/profiles/dev/hooks/inner.sh\n' "$LEG" > "$LEG/profiles/dev/hooks/h.sh"
@@ -1601,7 +1666,10 @@ printf '{ "projects": { "%s": { "n": 1 } } }\n' "$LEG" > "$LEG/profiles/dev/.cla
 printf 'dev\n' > "$LEG/active"
 printf 'model = "default"\n' > "$LEG/codex-default.config.toml"
 printf 'model = "dev"\n' > "$LEG/profiles/dev/codex.config.toml"
+printf '{"theme":"default"}\n' > "$LEG/gemini-default.settings.json"
+printf '{"theme":"dev"}\n' > "$LEG/profiles/dev/gemini.settings.json"
 ln -s "$LEG/profiles/dev/codex.config.toml" "$MIGRATE_HOME/.codex/config.toml"
+ln -s "$LEG/profiles/dev/gemini.settings.json" "$MIGRATE_HOME/.gemini/settings.json"
 
 # shellcheck disable=SC2030,SC2031
 out=$(HOME="$MIGRATE_HOME"; CLAUDE_PROFILES_DIR="$NEW"; export HOME CLAUDE_PROFILES_DIR
@@ -1611,8 +1679,11 @@ check "migration moved profiles"     '[ -d "$NEW/profiles/dev" ] && [ ! -e "$LEG
 check "migration moved active"       '[ -f "$NEW/active" ]'
 check "migration moved exports"      '[ -d "$NEW/exports" ]'
 check "migration moved default Codex config" '[ -f "$NEW/codex-default.config.toml" ]'
+check "migration moved default Gemini settings" '[ -f "$NEW/gemini-default.settings.json" ]'
 eq "migration retargets active Codex config" \
    "$(readlink "$MIGRATE_HOME/.codex/config.toml")" "$NEW/profiles/dev/codex.config.toml"
+eq "migration retargets active Gemini settings" \
+   "$(readlink "$MIGRATE_HOME/.gemini/settings.json")" "$NEW/profiles/dev/gemini.settings.json"
 check "settings.json points at the new store" \
    'grep -q "$NEW/profiles/dev/statusline.sh" "$NEW/profiles/dev/settings.json"'
 check "hook script points at the new store" \

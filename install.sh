@@ -127,7 +127,7 @@ preflight_migrations() {
     case "$_pm_source$_pm_store" in
         *[\\\&\|]*) die "profile store paths contain \\, & or |; refusing to migrate" ;;
     esac
-    for _pm_entry in profiles active exports .backups prompt-state.json codex-default.config.toml; do
+    for _pm_entry in profiles active exports .backups prompt-state.json codex-default.config.toml gemini-default.settings.json; do
         if { [ -e "$_pm_source/$_pm_entry" ] || [ -L "$_pm_source/$_pm_entry" ]; } &&
            { [ -e "$_pm_store/$_pm_entry" ] || [ -L "$_pm_store/$_pm_entry" ]; }; then
             die "$_pm_store already has $_pm_entry; refusing to merge"
@@ -318,10 +318,25 @@ restore_codex_config() {
     esac
 }
 
+restore_gemini_settings() {
+    _store=${CLAUDE_PROFILES_DIR:-$HOME/.agent-profiles}
+    _config="$HOME/.gemini/settings.json"
+    _default="$_store/gemini-default.settings.json"
+    case "$(readlink "$_config" 2>/dev/null)" in
+        "$_store"/profiles/*/gemini.settings.json|"$_default")
+            [ -f "$_default" ] || return 0
+            _tmp="$_config.tmp.$$"
+            cp -L "$_default" "$_tmp" || { rm -f "$_tmp"; die "could not restore $_config"; }
+            mv -f "$_tmp" "$_config" || { rm -f "$_tmp"; die "could not restore $_config"; }
+            ;;
+    esac
+}
+
 # rm -rf "$INSTALL_DIR" needs no extra guard: the canonicalising check at the
 # top of this file already refused /, $HOME and its ancestors before any flag ran.
 if [ -n "$uninstall" ]; then
     restore_codex_config
+    restore_gemini_settings
     drop_lines "$rc" '^[[:space:]]*(\.|source)[[:space:]].*(agent|claude)-profile\.sh'
     drop_lines "$rc" '^# claude-profile — added by install.sh$'
     drop_zshenv_block "$ZSHENV"

@@ -4,7 +4,7 @@
 #
 # Sourced by ../agent-profile.sh. Not standalone: no shebang, no set -e.
 
-_CP_MIGRATE_ENTRIES="profiles active exports .backups prompt-state.json codex-default.config.toml"
+_CP_MIGRATE_ENTRIES="profiles active exports .backups prompt-state.json codex-default.config.toml gemini-default.settings.json"
 
 _cp_migrate_store() {
     [ -n "${ZSH_VERSION:-}" ] && setopt localoptions nonomatch shwordsplit
@@ -71,6 +71,13 @@ _cp_migrate_store() {
         "$_ms_from"/*)
             _ms_codex_target="$_ms_to/${_ms_codex_link#"$_ms_from"/}"
             [ -e "$_ms_codex_target" ] && _cp_codex_link "$_ms_codex_target" || return 1
+            ;;
+    esac
+    _ms_gemini_link=$(readlink "$HOME/.gemini/settings.json" 2>/dev/null)
+    case "$_ms_gemini_link" in
+        "$_ms_from"/*)
+            _ms_gemini_target="$_ms_to/${_ms_gemini_link#"$_ms_from"/}"
+            [ -e "$_ms_gemini_target" ] && _cp_gemini_link "$_ms_gemini_target" || return 1
             ;;
     esac
     printf 'store is now %s\n' "$_ms_to"
