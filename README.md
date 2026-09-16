@@ -194,7 +194,9 @@ stores and `agent-profile` lists different profiles depending on which one
 you're in. Until the PowerShell half is migrated too, set
 `CLAUDE_PROFILES_DIR` explicitly, to the same path, for both — and install
 from a git clone with `install.ps1`; `npm i -g agent-profiles` on Windows
-does not run it (see [Install](#install)).
+does not run it (see [Install](#install)). npm 11 may first print its own
+`--allow-scripts=agent-profiles` warning because it blocks package install
+scripts by default; the supported Windows path is still the clone installer.
 
 `install.ps1` edits `$PROFILE`, checks that a fresh PowerShell really does end
 up with both commands defined, and warns if your execution policy is

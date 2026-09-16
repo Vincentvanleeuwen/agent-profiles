@@ -103,15 +103,15 @@ jobs:
         run: |
           pwsh -NoLogo -File .\test.ps1
           pwsh -NoLogo -File .\test\fresh-install.ps1
-      - name: Verify Windows npm guidance
+      - name: Verify Windows npm outcome
         shell: pwsh
         run: |
           $packages = @(Get-ChildItem -LiteralPath dist -Filter '*.tgz')
           if ($packages.Count -ne 1) { throw "expected one package, found $($packages.Count)" }
           $root = Join-Path $env:RUNNER_TEMP 'agent-profiles-npm-guidance'
-          $output = npm install --global --allow-scripts=agent-profiles --prefix $root $packages[0].FullName 2>&1 | Out-String
+          $output = npm install --global --prefix $root $packages[0].FullName 2>&1 | Out-String
           if ($LASTEXITCODE -ne 0) { throw $output }
-          if ($output -notmatch 'Clone the repo and run install.ps1') { throw $output }
+          if ($output -notmatch 'Clone the repo and run install.ps1|allow-scripts=agent-profiles') { throw $output }
       - name: Record versions
         if: always()
         shell: pwsh
