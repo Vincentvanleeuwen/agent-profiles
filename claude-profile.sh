@@ -63,7 +63,8 @@ _cp_deref() {
     printf '%s' "$_dr_p"
 }
 
-_cp_libdir() { (cd "$(dirname "$(_cp_deref "$1")")" && pwd); }
+# Interactive chpwd hooks may print output that command substitution mistakes for the path.
+_cp_libdir() { (cd "$(dirname "$(_cp_deref "$1")")" >/dev/null 2>&1 && pwd); }
 _CP_LIB="$(_cp_libdir "$_CP_SELF")/lib"
 
 # Load order does not matter — sh resolves function references at call time, and

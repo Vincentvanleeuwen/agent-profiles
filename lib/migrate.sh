@@ -7,12 +7,13 @@
 _CP_MIGRATE_ENTRIES="profiles active exports .backups prompt-state.json codex-default.config.toml"
 
 _cp_migrate_store() {
+    [ -n "${ZSH_VERSION:-}" ] && setopt localoptions nonomatch shwordsplit
     _ms_from="$1"
     if [ -z "$_ms_from" ]; then
         printf 'claude-profile: --migrate-store needs a directory\n' >&2
         return 1
     fi
-    _ms_from=$(cd "$_ms_from" 2>/dev/null && pwd) || {
+    _ms_from=$(cd "$_ms_from" >/dev/null 2>&1 && pwd) || {
         printf 'claude-profile: no such directory "%s"\n' "$1" >&2
         return 1
     }
@@ -79,6 +80,7 @@ _cp_migrate_store() {
 # project history for the old clone directory, which still exists and must
 # keep pointing there.
 _cp_migrate_rewrite() {
+    [ -n "${ZSH_VERSION:-}" ] && setopt localoptions nonomatch shwordsplit
     _mr_from="$1"
     _mr_to="$2"
     _mr_backup="$_mr_to/.backups/migrate-$(date +%Y%m%d-%H%M%S)"

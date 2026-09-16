@@ -75,7 +75,7 @@ echo "== Task 1: resolution =="
 eq "store honours CLAUDE_PROFILES_DIR" "$(_cp_store)" "$TMP/store"
 
 got=$(unset CLAUDE_PROFILES_DIR; _cp_store)
-eq "store defaults under HOME" "$got" "$FAKEHOME/.claude-profiles"
+eq "store defaults under HOME" "$got" "$FAKEHOME/.agent-profiles"
 
 mkdir -p "$TMP/store/profiles/dev"
 printf 'dev\n' > "$TMP/store/active"
@@ -1017,6 +1017,96 @@ env HOME="$IH_STABLE" SHELL=/bin/zsh CP_RC="$IH_STABLE/.zshrc" CP_ZSHENV="$IH_ST
 eq "install is idempotent in the rc"     "$(grep -c 'claude-profile\.sh' "$IH_STABLE/.zshrc")" "1"
 eq "install is idempotent in the zshenv" "$(grep -c 'claude-profile/bin' "$IH_STABLE/.zshenv")" "1"
 
+IH_RENAME="$TMP/ihome-rename"
+mkdir -p "$IH_RENAME/.claude-profiles/profiles/keepme" \
+         "$IH_RENAME/.claude-profile/bin" "$IH_RENAME/.claude-profile/lib" \
+         "$IH_RENAME/.codex" "$IH_RENAME/.local/bin"
+printf 'old install\n' > "$IH_RENAME/.claude-profile/claude-profile.sh"
+: > "$IH_RENAME/.claude-profile/bin/keep"
+printf 'keepme\n' > "$IH_RENAME/.claude-profiles/active"
+printf 'model = "default"\n' > "$IH_RENAME/.claude-profiles/codex-default.config.toml"
+printf 'model = "profile"\n' > "$IH_RENAME/.claude-profiles/profiles/keepme/codex.config.toml"
+ln -s "$IH_RENAME/.claude-profiles/profiles/keepme/codex.config.toml" \
+      "$IH_RENAME/.codex/config.toml"
+printf '. "%s/.claude-profile/claude-profile.sh"\n' "$IH_RENAME" > "$IH_RENAME/.zshrc"
+printf '\n# claude-profile PATH — added by install.sh\ncase ":$PATH:" in *":%s/.claude-profile/bin:"*) ;; *) PATH="%s/.claude-profile/bin:$PATH" ;; esac\nexport PATH\n' \
+       "$IH_RENAME" "$IH_RENAME" > "$IH_RENAME/.zshenv"
+(
+    unset CLAUDE_PROFILES_DIR CLAUDE_PROFILE_INSTALL_DIR
+    HOME="$IH_RENAME" SHELL=/bin/zsh CP_RC="$IH_RENAME/.zshrc" \
+        CP_ZSHENV="$IH_RENAME/.zshenv" CP_LINK_DIR="$IH_RENAME/.local/bin" \
+        sh "$HERE/install.sh" --from-npm >/dev/null 2>&1
+)
+eq "install migrates legacy default paths" "$?" "0"
+check "legacy store moved to the agent path" \
+   '[ -d "$IH_RENAME/.agent-profiles/profiles/keepme" ] && [ ! -e "$IH_RENAME/.claude-profiles" ]'
+check "legacy install moved to the agent path" \
+   '[ -f "$IH_RENAME/.agent-profile/claude-profile.sh" ] && [ ! -e "$IH_RENAME/.claude-profile" ]'
+check "legacy install keeps unrecognised files" '[ -f "$IH_RENAME/.agent-profile/bin/keep" ]'
+eq "legacy migration retargets Codex" "$(readlink "$IH_RENAME/.codex/config.toml")" \
+   "$IH_RENAME/.agent-profiles/profiles/keepme/codex.config.toml"
+check "legacy migration rewrites shell paths" \
+   'grep -qF "$IH_RENAME/.agent-profile/claude-profile.sh" "$IH_RENAME/.zshrc" &&
+    grep -qF "$IH_RENAME/.agent-profile/bin" "$IH_RENAME/.zshenv" &&
+    ! grep -qF "$IH_RENAME/.claude-profile/bin" "$IH_RENAME/.zshenv"'
+
+IH_FOREIGN="$TMP/ihome-foreign-legacy-install"
+mkdir -p "$IH_FOREIGN/.claude-profile/bin"
+: > "$IH_FOREIGN/.claude-profile/bin/keep"
+HOME="$IH_FOREIGN" SHELL=/bin/zsh CP_RC="$IH_FOREIGN/.zshrc" \
+    CP_ZSHENV="$IH_FOREIGN/.zshenv" CP_LINK_DIR="$IH_FOREIGN/.local/bin" \
+    sh "$HERE/install.sh" --from-npm >/dev/null 2>&1
+eq "install refuses an unrecognised legacy install" "$?" "1"
+check "unrecognised legacy install remains untouched" \
+   '[ -f "$IH_FOREIGN/.claude-profile/bin/keep" ] &&
+    [ ! -e "$IH_FOREIGN/.agent-profile" ] && [ ! -e "$IH_FOREIGN/.zshrc" ]'
+
+IH_STORE_COLLISION="$TMP/ihome-store-collision"
+mkdir -p "$IH_STORE_COLLISION/.claude-profile/bin" \
+         "$IH_STORE_COLLISION/.claude-profile/lib" \
+         "$IH_STORE_COLLISION/.claude-profiles/profiles/old" \
+         "$IH_STORE_COLLISION/.agent-profiles/profiles/new"
+: > "$IH_STORE_COLLISION/.claude-profile/claude-profile.sh"
+: > "$IH_STORE_COLLISION/.claude-profile/bin/keep"
+(
+    unset CLAUDE_PROFILES_DIR CLAUDE_PROFILE_INSTALL_DIR
+    HOME="$IH_STORE_COLLISION" SHELL=/bin/zsh CP_RC="$IH_STORE_COLLISION/.zshrc" \
+        CP_ZSHENV="$IH_STORE_COLLISION/.zshenv" CP_LINK_DIR="$IH_STORE_COLLISION/.local/bin" \
+        sh "$HERE/install.sh" --from-npm >/dev/null 2>&1
+)
+eq "install preflights a legacy store collision" "$?" "1"
+check "store collision leaves the working install untouched" \
+   '[ -f "$IH_STORE_COLLISION/.claude-profile/bin/keep" ] &&
+    [ ! -e "$IH_STORE_COLLISION/.agent-profile" ] && [ ! -e "$IH_STORE_COLLISION/.zshrc" ]'
+
+IH_INSTALL_COLLISION="$TMP/ihome-install-collision"
+mkdir -p "$IH_INSTALL_COLLISION/.claude-profile/bin" \
+         "$IH_INSTALL_COLLISION/.claude-profile/lib" \
+         "$IH_INSTALL_COLLISION/.agent-profile"
+: > "$IH_INSTALL_COLLISION/.claude-profile/claude-profile.sh"
+HOME="$IH_INSTALL_COLLISION" SHELL=/bin/zsh CP_RC="$IH_INSTALL_COLLISION/.zshrc" \
+    CP_ZSHENV="$IH_INSTALL_COLLISION/.zshenv" CP_LINK_DIR="$IH_INSTALL_COLLISION/.local/bin" \
+    sh "$HERE/install.sh" --from-npm >/dev/null 2>&1
+eq "install preflights old and new install directories" "$?" "1"
+check "install collision creates no rc file" '[ ! -e "$IH_INSTALL_COLLISION/.zshrc" ]'
+
+IH_UNSAFE_PATH="$TMP/ihome&unsafe"
+mkdir -p "$IH_UNSAFE_PATH/.claude-profile/bin" \
+         "$IH_UNSAFE_PATH/.claude-profile/lib" \
+         "$IH_UNSAFE_PATH/.claude-profiles/profiles/keepme"
+: > "$IH_UNSAFE_PATH/.claude-profile/claude-profile.sh"
+: > "$IH_UNSAFE_PATH/.claude-profile/bin/keep"
+(
+    unset CLAUDE_PROFILES_DIR CLAUDE_PROFILE_INSTALL_DIR
+    HOME="$IH_UNSAFE_PATH" SHELL=/bin/zsh CP_RC="$IH_UNSAFE_PATH/.zshrc" \
+        CP_ZSHENV="$IH_UNSAFE_PATH/.zshenv" CP_LINK_DIR="$IH_UNSAFE_PATH/.local/bin" \
+        sh "$HERE/install.sh" --from-npm >/dev/null 2>&1
+)
+eq "install preflights unsafe migration paths" "$?" "1"
+check "unsafe path leaves the working install untouched" \
+   '[ -f "$IH_UNSAFE_PATH/.claude-profile/bin/keep" ] &&
+    [ ! -e "$IH_UNSAFE_PATH/.agent-profile" ] && [ ! -e "$IH_UNSAFE_PATH/.zshrc" ]'
+
 # CLAUDE_PROFILE_INSTALL_DIR must never resolve to $HOME, an ancestor of it, or
 # /, or copy_code's rm -rf would wipe real directories like ~/bin or ~/lib.
 IH5="$TMP/ihome-dangerous"
@@ -1446,7 +1536,11 @@ eq "resolver fails when only our shim is on PATH" "$?" "1"
 eq "install dir honours its env seam" \
    "$(CLAUDE_PROFILE_INSTALL_DIR=/x/y; _cp_install_dir)" "/x/y"
 got=$(unset CLAUDE_PROFILE_INSTALL_DIR; _cp_install_dir)
-eq "install dir defaults under HOME" "$got" "$FAKEHOME/.claude-profile"
+eq "install dir defaults under HOME" "$got" "$FAKEHOME/.agent-profile"
+
+check_with "library discovery ignores zsh chpwd output" zsh \
+   'out=$(HOME="$FAKEHOME" zsh -c '\''chpwd() { print noise; }; . "$1"; _cp_libdir "$1"'\'' _ "$CPX" 2>/dev/null) &&
+    [ "$out" = "$HERE" ]'
 
 eq "deref follows a symlink chain" "$(_cp_deref "$TMP/earlybin/claude")" \
    "$TMP/fakeinstall/bin/claude"
@@ -1491,6 +1585,20 @@ check "the original was backed up" \
 check "migration reports what it rewrote" 'echo "$out" | grep -q "settings.json"'
 check "rewritten hook keeps its executable bit" '[ -x "$NEW/profiles/dev/hooks/h.sh" ]'
 check "rewritten settings.json stays non-executable" '[ ! -x "$NEW/profiles/dev/settings.json" ]'
+
+if command -v zsh >/dev/null 2>&1; then
+    NOISY_FROM="$TMP/noisy-legacy"
+    NOISY_TO="$TMP/noisy-store"
+    mkdir -p "$NOISY_FROM/profiles/dev"
+    printf '{}\n' > "$NOISY_FROM/profiles/dev/settings.json"
+    out_noisy=$(HOME="$FAKEHOME" CLAUDE_PROFILES_DIR="$NOISY_TO" zsh -c \
+        '. "$1"; chpwd() { print noise; }; _cp_migrate_store "$2"' _ "$CPX" "$NOISY_FROM" 2>&1)
+    eq "store migration ignores zsh chpwd output" "$?" "0"
+    check "noisy migration still moves the profile" '[ -d "$NOISY_TO/profiles/dev" ]'
+else
+    skip "store migration ignores zsh chpwd output" zsh
+    skip "noisy migration still moves the profile" zsh
+fi
 
 # Retrying against the now-drained legacy dir must not say "nothing to
 # migrate" -- the destination already holds data, so this is either an

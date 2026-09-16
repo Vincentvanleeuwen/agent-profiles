@@ -12,7 +12,9 @@
 set -u
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
-INSTALL_DIR=${CLAUDE_PROFILE_INSTALL_DIR:-$HOME/.claude-profile}
+INSTALL_DIR=${CLAUDE_PROFILE_INSTALL_DIR:-$HOME/.agent-profile}
+LEGACY_INSTALL_DIR="$HOME/.claude-profile"
+LEGACY_STORE="$HOME/.claude-profiles"
 BIN_DIR="$INSTALL_DIR/bin"
 LINK_DIR=${CP_LINK_DIR:-$HOME/.local/bin}
 ZSHENV=${CP_ZSHENV:-$HOME/.zshenv}
@@ -90,6 +92,49 @@ done
 [ -f "$SELF_DIR/claude-profile.sh" ] || die "cannot find $SELF_DIR/claude-profile.sh"
 [ -d "$SELF_DIR/lib" ] || die "cannot find $SELF_DIR/lib — is the clone complete?"
 [ -d "$SELF_DIR/bin" ] || die "cannot find $SELF_DIR/bin — is the clone complete?"
+
+store_has_profile() {
+    [ -d "$1/profiles" ] || return 1
+    for _shp_profile in "$1"/profiles/*; do
+        [ -d "$_shp_profile" ] && return 0
+    done
+    return 1
+}
+
+preflight_migrations() {
+    if [ -z "${CLAUDE_PROFILE_INSTALL_DIR:-}" ] && [ -d "$LEGACY_INSTALL_DIR" ]; then
+        [ ! -e "$INSTALL_DIR" ] \
+            || die "both $LEGACY_INSTALL_DIR and $INSTALL_DIR exist; refusing to merge them"
+        if [ ! -f "$LEGACY_INSTALL_DIR/claude-profile.sh" ] ||
+           [ ! -d "$LEGACY_INSTALL_DIR/lib" ] || [ ! -d "$LEGACY_INSTALL_DIR/bin" ]; then
+            die "$LEGACY_INSTALL_DIR is not a recognised installation; refusing to move it"
+        fi
+    fi
+
+    _pm_source=""
+    if [ -z "${CLAUDE_PROFILES_DIR:-}" ] && [ -d "$LEGACY_STORE/profiles" ]; then
+        _pm_source="$LEGACY_STORE"
+    fi
+    if [ -z "$no_migrate" ] && [ "$SELF_DIR" != "$INSTALL_DIR" ] && store_has_profile "$SELF_DIR"; then
+        [ -z "$_pm_source" ] \
+            || die "both $LEGACY_STORE and $SELF_DIR contain profile stores; refusing to merge them"
+        _pm_source="$SELF_DIR"
+    fi
+    [ -n "$_pm_source" ] || return 0
+
+    _pm_store=${CLAUDE_PROFILES_DIR:-$HOME/.agent-profiles}
+    case "$_pm_source$_pm_store" in
+        *[\\\&\|]*) die "profile store paths contain \\, & or |; refusing to migrate" ;;
+    esac
+    for _pm_entry in profiles active exports .backups prompt-state.json codex-default.config.toml; do
+        if { [ -e "$_pm_source/$_pm_entry" ] || [ -L "$_pm_source/$_pm_entry" ]; } &&
+           { [ -e "$_pm_store/$_pm_entry" ] || [ -L "$_pm_store/$_pm_entry" ]; }; then
+            die "$_pm_store already has $_pm_entry; refusing to merge"
+        fi
+    done
+}
+
+[ -n "$uninstall" ] || preflight_migrations
 
 # CP_RC stays supported: it is how the test suite keeps this off a real rc.
 [ -n "$rc" ] || rc=${CP_RC:-}
@@ -259,7 +304,7 @@ drop_zshenv_block() {
 }
 
 restore_codex_config() {
-    _store=${CLAUDE_PROFILES_DIR:-$HOME/.claude-profiles}
+    _store=${CLAUDE_PROFILES_DIR:-$HOME/.agent-profiles}
     _config="$HOME/.codex/config.toml"
     _default="$_store/codex-default.config.toml"
     case "$(readlink "$_config" 2>/dev/null)" in
@@ -294,7 +339,7 @@ if [ -n "$uninstall" ]; then
     say ""
     say "Your profiles were not touched:"
     say ""
-    say "    ${CLAUDE_PROFILES_DIR:-$HOME/.claude-profiles}"
+    say "    ${CLAUDE_PROFILES_DIR:-$HOME/.agent-profiles}"
     exit 0
 fi
 
@@ -303,6 +348,12 @@ copy_code() {
     mkdir -p "$INSTALL_DIR" || die "could not create $INSTALL_DIR; nothing was installed"
     for _item in claude-profile.sh lib bin claude-profile.psm1; do
         [ -e "$SELF_DIR/$_item" ] || continue
+        if [ -n "${migrated_legacy_install:-}" ] && [ -d "$SELF_DIR/$_item" ]; then
+            mkdir -p "$INSTALL_DIR/$_item" || die "could not create $INSTALL_DIR/$_item"
+            cp -R "$SELF_DIR/$_item/." "$INSTALL_DIR/$_item/" \
+                || die "could not copy $_item into $INSTALL_DIR; $INSTALL_DIR exists but the copy is incomplete"
+            continue
+        fi
         rm -rf "${INSTALL_DIR:?}/$_item"
         # -R, not -r: -R is the POSIX spelling and it copies symlinks as
         # symlinks, which is what bin/claude-profile is.
@@ -319,16 +370,40 @@ copy_code() {
     say "installed the code to $INSTALL_DIR"
 }
 
+migrate_legacy_install() {
+    [ -n "${CLAUDE_PROFILE_INSTALL_DIR:-}" ] && return 0
+    [ -d "$LEGACY_INSTALL_DIR" ] || return 0
+    [ "$LEGACY_INSTALL_DIR" = "$INSTALL_DIR" ] && return 0
+    [ ! -e "$INSTALL_DIR" ] \
+        || die "both $LEGACY_INSTALL_DIR and $INSTALL_DIR exist; refusing to merge them"
+    mv "$LEGACY_INSTALL_DIR" "$INSTALL_DIR" \
+        || die "could not move $LEGACY_INSTALL_DIR to $INSTALL_DIR"
+    migrated_legacy_install=1
+    say "moved the installed code to $INSTALL_DIR"
+}
+
 # A pre-stable-install clone can carry its own store at $SELF_DIR/profiles.
 # --no-migrate exists so a live session's own $SELF_DIR/profiles is never moved by accident.
 migrate_clone_store() {
     [ -n "$no_migrate" ] && return 0
     [ "$SELF_DIR" = "$INSTALL_DIR" ] && return 0
     [ -d "$SELF_DIR/profiles" ] || return 0
+    store_has_profile "$SELF_DIR" || return 0
     say "found a store in $SELF_DIR, moving it out of the clone"
     "$TARGET" --migrate-store "$SELF_DIR" \
         || die "the code is installed but the store was not migrated. Run
      '\"$TARGET\" --migrate-store \"$SELF_DIR\"' by hand to see the error."
+}
+
+migrate_legacy_store() {
+    [ -n "$no_migrate" ] && return 0
+    [ -n "${CLAUDE_PROFILES_DIR:-}" ] && return 0
+    [ -d "$LEGACY_STORE/profiles" ] || return 0
+    say "found the legacy store at $LEGACY_STORE, moving it to $HOME/.agent-profiles"
+    "$TARGET" --migrate-store "$LEGACY_STORE" \
+        || die "the code is installed but the legacy store was not migrated"
+    rmdir "$LEGACY_STORE" 2>/dev/null \
+        || say "left $LEGACY_STORE in place because it contains unrecognised files"
 }
 
 link_bin() {
@@ -359,9 +434,14 @@ add_zshenv_path() {
     say "added the PATH line to $ZSHENV"
 }
 
+migrate_legacy_install
 copy_code
+migrate_legacy_store
 migrate_clone_store
 link_bin
+if [ -z "${CLAUDE_PROFILE_INSTALL_DIR:-}" ] && grep -qF "$LEGACY_INSTALL_DIR/bin" "$ZSHENV" 2>/dev/null; then
+    drop_zshenv_block "$ZSHENV"
+fi
 add_zshenv_path
 
 # Already mentioned: either it's our line already, or it points at a clone

@@ -24,7 +24,7 @@ git clone <this repo> ~/agent-profiles
 
 Either way you end up with two things on PATH: `agent-profile`, a new command
 for managing profiles, and a `claude` wrapper that points the real binary at
-whichever profile is active. Both are copied into a stable `~/.claude-profile`
+whichever profile is active. Both are copied into a stable `~/.agent-profile`
 (singular — a different directory from where your profiles themselves live,
 see [Where the data lives](#where-the-data-lives)), so nothing on PATH or in
 any rc file points into an npm/nvm prefix: changing your node version cannot
@@ -36,10 +36,11 @@ anything, if that resolves to `/`, to `$HOME` itself, or to an ancestor of
 that catastrophic. It also refuses early, before anything is touched, if
 `$HOME` itself does not resolve to a real directory.
 
-`claude-profile` remains an alias for existing scripts. The legacy
-`~/.claude-profile`, `~/.claude-profiles`, `.claude-profile` and
-`CLAUDE_PROFILE*` names stay unchanged so upgrading does not move data or break
-project pins.
+`claude-profile` remains an alias for existing scripts. On upgrade, the POSIX
+installer moves the old default directories from `~/.claude-profile` and
+`~/.claude-profiles` to `~/.agent-profile` and `~/.agent-profiles`. The legacy
+`.claude-profile` project pin and `CLAUDE_PROFILE*` environment variables stay
+compatible.
 
 On Windows, npm's postinstall cannot yet run the unmigrated `install.ps1` and
 prints a message telling you to clone the repo and run it yourself instead.
@@ -87,7 +88,7 @@ agent-profile development
 plain `~/.claude` and the original Codex config.
 
 The first switch preserves the existing `~/.codex/config.toml` as
-`~/.claude-profiles/codex-default.config.toml`. Existing profiles get a copy of
+`~/.agent-profiles/codex-default.config.toml`. Existing profiles get a copy of
 that default the first time they are selected. Restart an open Codex session
 after switching; running sessions keep the settings they started with.
 
@@ -122,7 +123,7 @@ shell either way, since that comes from sourcing your rc, not from the shim.
 ### Moving off an old clone
 
 Profiles used to live inside the clone itself, at
-`~/agent-profiles/profiles/`. They now default to `~/.claude-profiles`
+`~/agent-profiles/profiles/`. They now default to `~/.agent-profiles`
 (plural, outside any clone — see [Where the data
 lives](#where-the-data-lives)), so moving to this version needs a one-time
 migration:
@@ -146,7 +147,7 @@ anything only ever `--create`d and never customized — the files move
 correctly, but the command's own `store is now ...` success line never
 prints, and if `install.sh` triggered it automatically you'll see the
 worrying `the code is installed but the store was not migrated` message even
-though it was. Check `~/.claude-profiles/profiles/` (or your
+though it was. Check `~/.agent-profiles/profiles/` (or your
 `CLAUDE_PROFILES_DIR`) before re-running anything by hand — the data has
 already moved.
 
@@ -186,7 +187,7 @@ function, `agent-profile` as an alias:
 Both can be installed at once, and should be if you use both. They are meant
 to share one store, so that a profile created in either is visible in both —
 but that is **not currently true**. Only the Git Bash / `install.sh` half
-defaults to `~/.claude-profiles`; `install.ps1`'s store still defaults to its
+defaults to `~/.agent-profiles`; `install.ps1`'s store still defaults to its
 own module directory. Left on defaults, the two halves read two different
 stores and `agent-profile` lists different profiles depending on which one
 you're in. Until the PowerShell half is migrated too, set
@@ -277,7 +278,7 @@ the same question and then describes what you'd actually be running with:
 ```
 $ agent-profile --show
 dev  (active)
-  path     /home/you/.claude-profiles/profiles/dev
+  path     /home/you/.agent-profiles/profiles/dev
   model    opus-5
   plugins  superpowers@obra
   skills   research, writing
@@ -287,7 +288,7 @@ dev  (active)
 
 ## Where do profiles live?
 
-Under `<store>/profiles/<name>`, where the store is `~/.claude-profiles` unless
+Under `<store>/profiles/<name>`, where the store is `~/.agent-profiles` unless
 `$CLAUDE_PROFILES_DIR` says otherwise. Two commands save you working that out:
 
 ```sh
@@ -316,7 +317,7 @@ and the runtime directories.
 
 ## Where the data lives
 
-Profiles and the preserved default Codex config live in `~/.claude-profiles`
+Profiles and the preserved default Codex config live in `~/.agent-profiles`
 by default — outside any clone, so a clone can be deleted or moved without
 losing them. `profiles/` holds the profiles themselves, `active` the active
 profile name, `.backups/` the pre-update snapshots. Set `CLAUDE_PROFILES_DIR`
@@ -368,7 +369,7 @@ rm -rf <store>/profiles/<name>                # or wherever it landed
 cp -R <store>/.backups/<name>-<timestamp> <store>/profiles/<name>
 ```
 
-`<store>` is `~/.claude-profiles` by default, or `$CLAUDE_PROFILES_DIR` if you set it —
+`<store>` is `~/.agent-profiles` by default, or `$CLAUDE_PROFILES_DIR` if you set it —
 which is exactly why the status output names it rather than making you guess.
 
 ## Statusline
@@ -399,7 +400,7 @@ silently miss every profile that already exists.)
 
 Run `./install.sh --uninstall` from the clone. It removes the rc source line, the
 `.zshenv` PATH block, the `agent-profile` symlink, and the install directory
-(`~/.claude-profile` by default), and prints where your profile store still
+(`~/.agent-profile` by default), and prints where your profile store still
 lives — nothing under it is touched. Installed via npm? Use
 `agent-profile-install --uninstall` instead — it runs the same `install.sh`,
 kept inside the npm package after a git clone would be gone.
