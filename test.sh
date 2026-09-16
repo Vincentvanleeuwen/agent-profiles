@@ -1790,6 +1790,11 @@ check "native CI names all OS families" \
    'grep -q ubuntu-latest "$HERE/.github/workflows/test.yml" &&
     grep -q macos-latest "$HERE/.github/workflows/test.yml" &&
     grep -q windows-latest "$HERE/.github/workflows/test.yml"'
+check "README documents fresh package smoke" 'grep -q "test:fresh:posix" "$HERE/README.md"'
+check "README documents native CI scope" \
+   'grep -q ubuntu-latest "$HERE/README.md" &&
+    grep -q macos-latest "$HERE/README.md" &&
+    grep -q windows-latest "$HERE/README.md"'
 
 # CLAUDE_PROFILES_DIR is exported suite-wide (line ~61); pin every var the
 # installer reads, and pass --no-migrate so $HERE/profiles is never touched.

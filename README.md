@@ -432,6 +432,8 @@ Git for Windows for the management subcommands.
 
 ## Tests
 
+The main suites exercise the commands against a temporary store and fake home:
+
 ```sh
 zsh test.sh && bash test.sh && sh test.sh
 ```
@@ -440,8 +442,26 @@ zsh test.sh && bash test.sh && sh test.sh
 powershell -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
-Tests run against a temporary store and a temporary fake home. They never read
-or write your real `~/.claude` or `~/.codex`.
+The fresh-install checks go one step further. POSIX installs the packed npm
+artifact, not the checkout; Windows follows the documented clone plus
+`install.ps1` path:
+
+```sh
+npm run test:fresh:posix
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\test\fresh-install.ps1
+```
+
+Pull requests run these paths on `ubuntu-latest`, `macos-latest`, and
+`windows-latest`. Every job uses disposable config, install, store, npm prefix
+and shell files. Nothing reads or writes your real `~/.claude`, `~/.codex`, or
+profile store.
+
+This first CI layer does not install real AI clients or make authenticated model
+calls. The later Gemini, local-provider, nightly client, and release checks are
+specified in the [cross-platform validation design](docs/superpowers/specs/2026-09-16-cross-platform-install-validation-design.md).
 
 `test.ps1` ends with a drift guard. Profile resolution is the one piece of logic
 that exists twice — `lib/resolve.sh` and `agent-profile.psm1` — so rather than
