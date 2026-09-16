@@ -4,6 +4,7 @@ active
 .backups/
 .DS_Store
 .superpowers/
+.worktrees/
 docs/superpowers/
 prompt-state.json
 codex-default.config.toml
