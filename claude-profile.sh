@@ -10,9 +10,7 @@ elif [ -n "${ZSH_VERSION:-}" ]; then
     case "${ZSH_EVAL_CONTEXT:-}" in *file*) ;; *) _ap_compat_exec=1 ;; esac
 else
     _ap_compat_self="$0"
-    case "$0" in
-        claude-profile|claude-profile.sh|*/claude-profile|*/claude-profile.sh) _ap_compat_exec=1 ;;
-    esac
+    _ap_compat_plain_sh=1
 fi
 
 while [ -L "$_ap_compat_self" ]; do
@@ -23,6 +21,12 @@ while [ -L "$_ap_compat_self" ]; do
     esac
 done
 
+if [ -n "${_ap_compat_plain_sh:-}" ]; then
+    case "$_ap_compat_self" in
+        claude-profile|claude-profile.sh|*/claude-profile|*/claude-profile.sh) _ap_compat_exec=1 ;;
+    esac
+fi
+
 _ap_compat_dir=$(cd "$(dirname "$_ap_compat_self")" >/dev/null 2>&1 && pwd) || {
     printf 'claude-profile: cannot locate agent-profile.sh\n' >&2
     if [ -n "$_ap_compat_exec" ]; then exit 1; fi
@@ -31,6 +35,6 @@ _ap_compat_dir=$(cd "$(dirname "$_ap_compat_self")" >/dev/null 2>&1 && pwd) || {
 [ -n "$_ap_compat_exec" ] && _AP_COMPAT_EXEC=1
 . "$_ap_compat_dir/agent-profile.sh"
 _ap_compat_status=$?
-unset _AP_COMPAT_EXEC _ap_compat_exec _ap_compat_self _ap_compat_target _ap_compat_dir
+unset _AP_COMPAT_EXEC _ap_compat_exec _ap_compat_self _ap_compat_target _ap_compat_plain_sh _ap_compat_dir
 if [ -n "${_CP_EXEC:-}" ]; then exit "$_ap_compat_status"; fi
 unset _ap_compat_status

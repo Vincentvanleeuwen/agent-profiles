@@ -907,6 +907,9 @@ ln -s "$HERE/claude-profile.sh" "$TMP/legacy-profile-link"
 check "legacy POSIX symlink still executes" \
    'env HOME="$FAKEHOME" CLAUDE_PROFILES_DIR="$TMP/store" "$TMP/legacy-profile-link" --help |
     grep -q -- "--create"'
+check "legacy POSIX symlink executes under dash" \
+   'env HOME="$FAKEHOME" CLAUDE_PROFILES_DIR="$TMP/store" dash "$TMP/legacy-profile-link" --help |
+    grep -q -- "--create"'
 check "legacy POSIX symlink still sources" \
    'bash -c '\'' . "$1"; [ "$(type -t agent-profile)" = function ]'\'' _ "$TMP/legacy-profile-link"'
 check "canonical PowerShell module exists" '[ -f "$HERE/agent-profile.psm1" ]'
