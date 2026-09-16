@@ -30,24 +30,63 @@ Import-Module line, and checks that a fresh PowerShell picks it up.
     exit 0
 }
 
-$selfDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$module  = Join-Path $selfDir 'agent-profile.psm1'
-$shim    = Join-Path $selfDir 'agent-profile.sh'
-$legacyModule = Join-Path $selfDir 'claude-profile.psm1'
+$sourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$homeDir = if ($env:HOME) { $env:HOME } else { $HOME }
+$installDir = if ($env:CLAUDE_PROFILE_INSTALL_DIR) {
+    $env:CLAUDE_PROFILE_INSTALL_DIR
+} else {
+    Join-Path $homeDir '.agent-profile'
+}
 
 function Say  { param([string]$m) Write-Host $m }
 function Warn { param([string]$m) [Console]::Error.WriteLine($m) }
 function Die  { param([string]$m) [Console]::Error.WriteLine("install: $m"); exit 1 }
 
-if (-not (Test-Path -LiteralPath $module)) { Die "cannot find $module" }
-if (-not (Test-Path -LiteralPath (Join-Path $selfDir 'lib'))) {
-    Die "cannot find $selfDir\lib -- is the clone complete?"
+if (-not (Test-Path -LiteralPath (Join-Path $sourceDir 'agent-profile.psm1'))) {
+    Die "cannot find $sourceDir\agent-profile.psm1"
 }
+if (-not (Test-Path -LiteralPath (Join-Path $sourceDir 'lib'))) {
+    Die "cannot find $sourceDir\lib -- is the clone complete?"
+}
+
+$homeFull = [IO.Path]::GetFullPath($homeDir).TrimEnd('\', '/')
+$installFull = [IO.Path]::GetFullPath($installDir).TrimEnd('\', '/')
+$installPrefix = $installFull + [IO.Path]::DirectorySeparatorChar
+if ([StringComparer]::OrdinalIgnoreCase.Equals($installFull, $homeFull) -or
+    $homeFull.StartsWith($installPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    Die 'CLAUDE_PROFILE_INSTALL_DIR cannot be HOME or one of its parents'
+}
+
+$sourceModule = Join-Path $sourceDir 'agent-profile.psm1'
+$sourceLegacyModule = Join-Path $sourceDir 'claude-profile.psm1'
+$sourceFull = [IO.Path]::GetFullPath($sourceDir).TrimEnd('\', '/')
+if (-not [StringComparer]::OrdinalIgnoreCase.Equals($sourceFull, $installFull)) {
+    New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+    foreach ($name in @(
+        'agent-profile.psm1', 'agent-profile.sh', 'claude-profile.psm1',
+        'claude-profile.sh', 'install.ps1', 'install.sh', 'lib', 'bin', 'scripts'
+    )) {
+        $source = Join-Path $sourceDir $name
+        $destination = Join-Path $installDir $name
+        if (Test-Path -LiteralPath $destination) {
+            Remove-Item -LiteralPath $destination -Recurse -Force
+        }
+        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+    }
+    Say "installed code in $installDir"
+}
+
+$selfDir = $installDir
+$module  = Join-Path $selfDir 'agent-profile.psm1'
+$shim    = Join-Path $selfDir 'agent-profile.sh'
+$legacyModule = Join-Path $selfDir 'claude-profile.psm1'
 
 # Single-quoted so nothing in the path is expanded at profile-load time; a quote
 # inside the path is escaped the PowerShell way, by doubling it.
 $line = "Import-Module '" + ($module -replace "'", "''") + "'"
 $legacyLine = "Import-Module '" + ($legacyModule -replace "'", "''") + "'"
+$sourceLine = "Import-Module '" + ($sourceModule -replace "'", "''") + "'"
+$sourceLegacyLine = "Import-Module '" + ($sourceLegacyModule -replace "'", "''") + "'"
 
 $target = if ($ProfilePath) { $ProfilePath } else { $PROFILE }
 $explicit = [bool]$ProfilePath
@@ -69,14 +108,22 @@ if (Test-Path -LiteralPath $target -PathType Leaf) {
 if ($existingText -match '(agent|claude)-profile\.psm1') {
     $hasExact = $false
     $hasLegacyExact = $false
+    $hasSourceExact = $false
     foreach ($l in ($existingText -split "`r?`n")) {
         if ($l.Trim() -eq $line) { $hasExact = $true; break }
         if ($l.Trim() -eq $legacyLine) { $hasLegacyExact = $true }
+        if ($l.Trim() -eq $sourceLine -or $l.Trim() -eq $sourceLegacyLine) { $hasSourceExact = $true }
     }
     if ($hasExact) {
         Say "already installed in $target"
     } elseif ($hasLegacyExact) {
         Say "already installed through the compatibility module in $target"
+    } elseif ($hasSourceExact) {
+        $updated = @(foreach ($l in ($existingText -split "`r?`n")) {
+            if ($l.Trim() -eq $sourceLine -or $l.Trim() -eq $sourceLegacyLine) { $line } else { $l }
+        }) -join "`r`n"
+        [IO.File]::WriteAllText($target, $updated, (New-Object System.Text.UTF8Encoding($false)))
+        Say "updated the import line in $target"
     } else {
         Warn "install: $target already refers to a profile module, but not the"
         Warn "way this script would write it:"
