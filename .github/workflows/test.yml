@@ -1,0 +1,131 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test
+      - name: Pack once
+        run: |
+          mkdir dist
+          npm pack --pack-destination dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: dist/*.tgz
+          if-no-files-found: error
+
+  posix:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: dist
+      - name: Run shell suites
+        run: |
+          sh test.sh
+          bash test.sh
+          zsh test.sh
+      - name: Install the packed artifact
+        run: |
+          set -- dist/*.tgz
+          [ "$#" -eq 1 ]
+          sh test/fresh-install.sh "$1"
+      - name: Record versions
+        if: always()
+        run: |
+          {
+            printf 'runner=%s\n' '${{ matrix.os }}'
+            uname -a
+            node --version
+            npm --version
+            sh --version 2>&1 || true
+            bash --version | head -1
+            zsh --version
+          } > test-evidence.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-${{ matrix.os }}
+          path: test-evidence.txt
+          if-no-files-found: warn
+
+  windows:
+    needs: package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: dist
+      - name: Git Bash suite
+        shell: bash
+        run: sh test.sh
+      - name: Windows PowerShell suite
+        shell: powershell
+        run: |
+          powershell -NoLogo -ExecutionPolicy Bypass -File .\test.ps1
+          powershell -NoLogo -ExecutionPolicy Bypass -File .\test\fresh-install.ps1
+      - name: PowerShell 7 suite
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -File .\test.ps1
+          pwsh -NoLogo -File .\test\fresh-install.ps1
+      - name: Verify Windows npm guidance
+        shell: pwsh
+        run: |
+          $packages = @(Get-ChildItem -LiteralPath dist -Filter '*.tgz')
+          if ($packages.Count -ne 1) { throw "expected one package, found $($packages.Count)" }
+          $root = Join-Path $env:RUNNER_TEMP 'agent-profiles-npm-guidance'
+          $output = npm install --global --prefix $root $packages[0].FullName 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw $output }
+          if ($output -notmatch 'Clone the repo and run install.ps1') { throw $output }
+      - name: Record versions
+        if: always()
+        shell: pwsh
+        run: |
+          @(
+            'runner=windows-latest'
+            "node=$(node --version)"
+            "npm=$(npm --version)"
+            "powershell=$($PSVersionTable.PSVersion)"
+          ) | Set-Content -LiteralPath test-evidence.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-windows-latest
+          path: test-evidence.txt
+          if-no-files-found: warn

@@ -1785,6 +1785,11 @@ check "fresh POSIX package smoke exists" '[ -x "$HERE/test/fresh-install.sh" ]'
 check "fresh POSIX package smoke parses" 'sh -n "$HERE/test/fresh-install.sh"'
 check_with "fresh POSIX npm script is wired" node \
    'node -e "const p=require(\"$HERE/package.json\"); if (p.scripts[\"test:fresh:posix\"] !== \"sh test/fresh-install.sh\") process.exit(1)"'
+check "native CI workflow exists" '[ -f "$HERE/.github/workflows/test.yml" ]'
+check "native CI names all OS families" \
+   'grep -q ubuntu-latest "$HERE/.github/workflows/test.yml" &&
+    grep -q macos-latest "$HERE/.github/workflows/test.yml" &&
+    grep -q windows-latest "$HERE/.github/workflows/test.yml"'
 
 # CLAUDE_PROFILES_DIR is exported suite-wide (line ~61); pin every var the
 # installer reads, and pass --no-migrate so $HERE/profiles is never touched.
