@@ -12,6 +12,12 @@ $oldInstall = $env:CLAUDE_PROFILE_INSTALL_DIR
 
 try {
     New-Item -ItemType Directory -Force -Path $fakeHome | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $fakeHome '.claude') | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $fakeHome '.codex') | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $fakeHome '.gemini') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $fakeHome '.claude\settings.json'), '{"model":"default-marker"}')
+    [IO.File]::WriteAllText((Join-Path $fakeHome '.codex\config.toml'), 'model = "default-marker"')
+    [IO.File]::WriteAllText((Join-Path $fakeHome '.gemini\settings.json'), '{"theme":"default-marker"}')
     $env:HOME = $fakeHome
     $env:CLAUDE_PROFILES_DIR = Join-Path $fakeHome '.agent-profiles'
     $env:CLAUDE_PROFILE_INSTALL_DIR = Join-Path $fakeHome '.agent-profile'
@@ -35,6 +41,22 @@ try {
     }
     if ((Get-Command claude-profile).CommandType -ne 'Alias') {
         throw 'claude-profile compatibility alias is missing'
+    }
+
+    agent-profile --create fresh
+    if ($LASTEXITCODE -ne 0) { throw 'profile creation failed' }
+    agent-profile fresh
+    if ($LASTEXITCODE -ne 0) { throw 'profile activation failed' }
+    if (-not [IO.File]::ReadAllText((Join-Path $fakeHome '.codex\config.toml')).Contains('default-marker')) {
+        throw 'Codex profile settings were not activated'
+    }
+    if (-not [IO.File]::ReadAllText((Join-Path $fakeHome '.gemini\settings.json')).Contains('default-marker')) {
+        throw 'Gemini profile settings were not activated'
+    }
+    agent-profile default
+    if ($LASTEXITCODE -ne 0) { throw 'default profile activation failed' }
+    if (Test-Path -LiteralPath (Join-Path $env:CLAUDE_PROFILES_DIR 'active')) {
+        throw 'default profile left an active marker'
     }
 
     $profileText = [IO.File]::ReadAllText($profilePath)

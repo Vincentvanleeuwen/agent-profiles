@@ -157,32 +157,50 @@ try {
     Check 'read: missing file' '' (& $mod { Read-CpName $args[0] } (Join-Path $root 'nope.txt'))
 
     $codexDir = Join-Path $fakeHome '.codex'
+    $geminiDir = Join-Path $fakeHome '.gemini'
     $codexConfig = Join-Path $codexDir 'config.toml'
+    $geminiConfig = Join-Path $geminiDir 'settings.json'
     $defaultCodex = Join-Path $store 'codex-default.config.toml'
+    $defaultGemini = Join-Path $store 'gemini-default.settings.json'
     $workCodex = Join-Path $store 'profiles\work\codex.config.toml'
     $financeCodex = Join-Path $store 'profiles\finance\codex.config.toml'
+    $workGemini = Join-Path $store 'profiles\work\gemini.settings.json'
+    $financeGemini = Join-Path $store 'profiles\finance\gemini.settings.json'
     New-Item -ItemType Directory -Force -Path $codexDir | Out-Null
-    Utf8NoBom $codexConfig 'model = "default"'
-    Utf8NoBom $workCodex 'model = "work"'
+    New-Item -ItemType Directory -Force -Path $geminiDir | Out-Null
+    Utf8NoBom $codexConfig "model = `"default`"`nmodel_provider = `"ollama`"`nbase_url = `"http://127.0.0.1:11434/v1`""
+    Utf8NoBom $geminiConfig '{"theme":"default"}'
+    Utf8NoBom $workCodex "model = `"work`"`nmodel_provider = `"lmstudio`"`nbase_url = `"http://127.0.0.1:1234/v1`""
     Utf8NoBom $financeCodex 'model = "finance"'
+    Utf8NoBom $workGemini '{"theme":"work"}'
+    Utf8NoBom $financeGemini '{"theme":"finance"}'
 
     & $mod { Set-CpActiveProfile 'work' }
-    Check 'codex: activates profile settings' 'model = "work"' ([IO.File]::ReadAllText($codexConfig).Trim())
-    Check 'codex: preserves default settings' 'model = "default"' ([IO.File]::ReadAllText($defaultCodex).Trim())
+    Check 'codex: activates profile settings' $true ([IO.File]::ReadAllText($codexConfig).Contains('1234'))
+    Check 'codex: preserves default settings' $true ([IO.File]::ReadAllText($defaultCodex).Contains('11434'))
     Check 'codex: live config is a real file' $false ((Get-Item -LiteralPath $codexConfig).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint))
+    Check 'gemini: activates profile settings' $true ([IO.File]::ReadAllText($geminiConfig).Contains('work'))
+    Check 'gemini: preserves default settings' $true ([IO.File]::ReadAllText($defaultGemini).Contains('default'))
+    Check 'gemini: live settings is a real file' $false ((Get-Item -LiteralPath $geminiConfig).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint))
 
     Utf8NoBom $codexConfig 'model = "edited"'
+    Utf8NoBom $geminiConfig '{"provider":"edited"}'
     & $mod { Set-CpActiveProfile 'finance' }
     Check 'codex: snapshots outgoing profile' 'model = "edited"' ([IO.File]::ReadAllText($workCodex).Trim())
     Check 'codex: switches to next profile' 'model = "finance"' ([IO.File]::ReadAllText($codexConfig).Trim())
+    Check 'gemini: snapshots outgoing profile' $true ([IO.File]::ReadAllText($workGemini).Contains('edited'))
+    Check 'gemini: switches to next profile' $true ([IO.File]::ReadAllText($geminiConfig).Contains('finance'))
 
     & $mod { Set-CpDefaultProfile }
-    Check 'codex: restores default settings' 'model = "default"' ([IO.File]::ReadAllText($codexConfig).Trim())
+    Check 'codex: restores default settings' $true ([IO.File]::ReadAllText($codexConfig).Contains('11434'))
+    Check 'gemini: restores default settings' $true ([IO.File]::ReadAllText($geminiConfig).Contains('default'))
     Check 'codex: default clears active marker' $false (Test-Path -LiteralPath (Join-Path $store 'active'))
 
     Remove-Item -LiteralPath $financeCodex -Force
+    Remove-Item -LiteralPath $financeGemini -Force
     & $mod { Set-CpActiveProfile 'finance' }
-    Check 'codex: seeds missing profile settings' 'model = "default"' ([IO.File]::ReadAllText($financeCodex).Trim())
+    Check 'codex: seeds missing profile settings' $true ([IO.File]::ReadAllText($financeCodex).Contains('11434'))
+    Check 'gemini: seeds missing profile settings' $true ([IO.File]::ReadAllText($financeGemini).Contains('default'))
     & $mod { Set-CpDefaultProfile }
 
     # --- resolution precedence -----------------------------------------------

@@ -4,13 +4,9 @@
 # that shadows the real binary. PowerShell cannot see a POSIX function, so on
 # Windows that mechanism has to be built a second time; this file is it.
 #
-# Only two things are reimplemented here: working out which profile is selected,
-# and starting claude with CLAUDE_CONFIG_DIR pointed at it. Both are on the path
-# you take every time you type `claude`, and spawning bash to answer them would
-# be felt. Everything else -- create, update, delete, show, diff, export,
-# import -- is handed to agent-profile.sh under Git Bash, so the logic with
-# actual risk in it (copying trees, moving backups, rewriting JSON) keeps exactly
-# one implementation.
+# Selection, Claude launching, and settings switching stay native so they work
+# without Git Bash or Windows symlink privileges. Tree management remains in
+# agent-profile.sh under Git Bash so backups and JSON rewriting have one owner.
 #
 # ASCII only, deliberately. Windows PowerShell 5.1 reads a script with no BOM as
 # Windows-1252, so a UTF-8 em dash in a comment here would arrive as mojibake.
@@ -189,6 +185,19 @@ function Get-CpCodexProfile {
     return (Join-Path (Get-CpProfileDir $Name) 'codex.config.toml')
 }
 
+function Get-CpGeminiConfig {
+    return (Join-Path (Join-Path (Get-CpHome) '.gemini') 'settings.json')
+}
+
+function Get-CpGeminiDefault {
+    return (Join-Path (Get-CpStore) 'gemini-default.settings.json')
+}
+
+function Get-CpGeminiProfile {
+    param([string]$Name)
+    return (Join-Path (Get-CpProfileDir $Name) 'gemini.settings.json')
+}
+
 function Copy-CpFileAtomic {
     param([string]$Source, [string]$Destination)
     $dir = Split-Path -Parent $Destination
@@ -254,6 +263,40 @@ function Save-CpCodexCurrent {
     Copy-CpFileAtomic $live $destination
 }
 
+function Initialize-CpGeminiDefault {
+    $default = Get-CpGeminiDefault
+    if (Test-Path -LiteralPath $default -PathType Leaf) { return }
+    $live = Get-CpGeminiConfig
+    if (Test-Path -LiteralPath $live -PathType Leaf) {
+        Copy-CpFileAtomic $live $default
+    } else {
+        Write-CpTextAtomic $default ''
+    }
+}
+
+function Save-CpGeminiCurrent {
+    $live = Get-CpGeminiConfig
+    if (-not (Test-Path -LiteralPath $live -PathType Leaf)) { return }
+    $active = Read-CpName (Join-Path (Get-CpStore) 'active')
+    $destination = if ($active -and (Test-Path -LiteralPath (Get-CpProfileDir $active) -PathType Container)) {
+        Get-CpGeminiProfile $active
+    } else {
+        Get-CpGeminiDefault
+    }
+    Copy-CpFileAtomic $live $destination
+}
+
+function Restore-CpClientSelection {
+    param([string]$Name)
+    if ($Name -and (Test-Path -LiteralPath (Get-CpProfileDir $Name) -PathType Container)) {
+        Copy-CpFileAtomic (Get-CpCodexProfile $Name) (Get-CpCodexConfig)
+        Copy-CpFileAtomic (Get-CpGeminiProfile $Name) (Get-CpGeminiConfig)
+    } else {
+        Copy-CpFileAtomic (Get-CpCodexDefault) (Get-CpCodexConfig)
+        Copy-CpFileAtomic (Get-CpGeminiDefault) (Get-CpGeminiConfig)
+    }
+}
+
 function Set-CpActiveProfile {
     param([string]$Name)
     $dir = Get-CpProfileDir $Name
@@ -261,21 +304,42 @@ function Set-CpActiveProfile {
         throw ('claude-profile: no such profile "{0}"' -f $Name)
     }
     Initialize-CpCodexDefault
+    Initialize-CpGeminiDefault
     Save-CpCodexCurrent
+    Save-CpGeminiCurrent
     $target = Get-CpCodexProfile $Name
     if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
         Copy-CpFileAtomic (Get-CpCodexDefault) $target
     }
-    Copy-CpFileAtomic $target (Get-CpCodexConfig)
-    Write-CpTextAtomic (Join-Path (Get-CpStore) 'active') "$Name`n"
+    $geminiTarget = Get-CpGeminiProfile $Name
+    if (-not (Test-Path -LiteralPath $geminiTarget -PathType Leaf)) {
+        Copy-CpFileAtomic (Get-CpGeminiDefault) $geminiTarget
+    }
+    $oldActive = Read-CpName (Join-Path (Get-CpStore) 'active')
+    try {
+        Copy-CpFileAtomic $target (Get-CpCodexConfig)
+        Copy-CpFileAtomic $geminiTarget (Get-CpGeminiConfig)
+        Write-CpTextAtomic (Join-Path (Get-CpStore) 'active') "$Name`n"
+    } catch {
+        try { Restore-CpClientSelection $oldActive } catch { }
+        throw
+    }
     $env:CLAUDE_CONFIG_DIR = $dir
 }
 
 function Set-CpDefaultProfile {
     Initialize-CpCodexDefault
+    Initialize-CpGeminiDefault
     Save-CpCodexCurrent
-    Copy-CpFileAtomic (Get-CpCodexDefault) (Get-CpCodexConfig)
-    Remove-Item -LiteralPath (Join-Path (Get-CpStore) 'active') -Force -ErrorAction SilentlyContinue
+    Save-CpGeminiCurrent
+    $oldActive = Read-CpName (Join-Path (Get-CpStore) 'active')
+    try {
+        Restore-CpClientSelection ''
+        Remove-Item -LiteralPath (Join-Path (Get-CpStore) 'active') -Force -ErrorAction SilentlyContinue
+    } catch {
+        try { Restore-CpClientSelection $oldActive } catch { }
+        throw
+    }
     $env:CLAUDE_CONFIG_DIR = (Get-CpBaseDir)
 }
 
@@ -316,9 +380,13 @@ function Invoke-CpBash {
     # of a string containing backslashes.
     $oldStore = $env:CLAUDE_PROFILES_DIR
     $oldWin   = $env:CLAUDE_PROFILE_WINPATH
+    $oldHome  = $env:HOME
     try {
         if (Test-CpWindowsPath $oldStore) {
             $env:CLAUDE_PROFILES_DIR = ConvertTo-CpPosixPath $oldStore
+        }
+        if (Test-CpWindowsPath $oldHome) {
+            $env:HOME = ConvertTo-CpPosixPath $oldHome
         }
         # Paths bash prints for a person to read (--path, --open, the path line
         # in --show) come back as /c/Users/... otherwise, which is correct in the
@@ -330,6 +398,7 @@ function Invoke-CpBash {
     } finally {
         Set-CpEnv 'CLAUDE_PROFILES_DIR' $oldStore
         Set-CpEnv 'CLAUDE_PROFILE_WINPATH' $oldWin
+        Set-CpEnv 'HOME' $oldHome
     }
 }
 
