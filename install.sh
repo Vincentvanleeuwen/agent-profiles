@@ -554,7 +554,7 @@ else
     # is the second reason this is not a `-c` away.
     seen=$("$verify_bin" -i -c \
         'printf "__agent_profiles_probe__%s\n" "$(command -v claude)"' 2>/dev/null |
-        sed -n 's/^__agent_profiles_probe__//p')
+        LC_ALL=C sed -n 's/^__agent_profiles_probe__//p')
     case "$seen" in
         claude) say "verified: a new interactive $want_shell defines the wrapper" ;;
         alias*)
@@ -576,7 +576,7 @@ else
     # on macOS, so the symlink on its own is not something to take on trust.
     seen_cp=$("$verify_bin" -i -c \
         'printf "__agent_profiles_probe__%s\n" "$(command -v agent-profile)"' 2>/dev/null |
-        sed -n 's/^__agent_profiles_probe__//p')
+        LC_ALL=C sed -n 's/^__agent_profiles_probe__//p')
     case "$seen_cp" in
         "")
             die "wrote $rc, but a new interactive $want_shell has no agent-profile
@@ -597,7 +597,7 @@ else
     # reaches, on an install that otherwise looks perfect.
     login_seen=$("$verify_bin" -l -i -c \
         'printf "__agent_profiles_probe__%s\n" "$(command -v claude)"' 2>/dev/null |
-        sed -n 's/^__agent_profiles_probe__//p')
+        LC_ALL=C sed -n 's/^__agent_profiles_probe__//p')
     if [ "$login_seen" = claude ]; then
         say "verified: login shells pick it up too"
     else

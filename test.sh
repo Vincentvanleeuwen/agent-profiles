@@ -1357,7 +1357,7 @@ check "install picks .zshrc for a zsh login shell" \
     grep -qF "agent-profile.sh" "$IH2/.zshrc"'
 
 IH_NOISY="$TMP/ihome-noisy-zsh"; mkdir -p "$IH_NOISY"
-printf 'printf "startup noise\\n"\n' > "$IH_NOISY/.zshrc"
+printf 'printf "\\234startup noise\\n"\n' > "$IH_NOISY/.zshrc"
 check "install ignores unrelated zsh startup output" \
    'env HOME="$IH_NOISY" SHELL=/bin/zsh sh "$HERE/install.sh" --no-migrate >/dev/null 2>&1'
 
