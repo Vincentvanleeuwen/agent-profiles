@@ -1781,6 +1781,10 @@ check_with "postinstall is wired to the dispatcher" node \
       const p = JSON.parse(require(\"fs\").readFileSync(\"$HERE/package.json\",\"utf8\"));
       if (!/postinstall\.mjs/.test(p.scripts.postinstall)) process.exit(1);
    "'
+check "fresh POSIX package smoke exists" '[ -x "$HERE/test/fresh-install.sh" ]'
+check "fresh POSIX package smoke parses" 'sh -n "$HERE/test/fresh-install.sh"'
+check_with "fresh POSIX npm script is wired" node \
+   'node -e "const p=require(\"$HERE/package.json\"); if (p.scripts[\"test:fresh:posix\"] !== \"sh test/fresh-install.sh\") process.exit(1)"'
 
 # CLAUDE_PROFILES_DIR is exported suite-wide (line ~61); pin every var the
 # installer reads, and pass --no-migrate so $HERE/profiles is never touched.

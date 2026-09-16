@@ -22,7 +22,8 @@
   ],
   "scripts": {
     "postinstall": "node scripts/postinstall.mjs",
-    "test": "sh test.sh"
+    "test": "sh test.sh",
+    "test:fresh:posix": "sh test/fresh-install.sh"
   },
   "engines": { "node": ">=18" }
 }
