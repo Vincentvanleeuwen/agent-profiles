@@ -258,6 +258,7 @@ See [Uninstall](#uninstall) for removing either half.
 | `agent-profile --delete <name>` | Delete (moved to `.backups/`) |
 | `agent-profile --rename <a> <b>` | Rename |
 | `agent-profile --copy <a> <b>` | Duplicate |
+| `agent-profile --link-skills [name]` | Link the shared skills in `~/.agents/skills` into `<name>` (default: active) |
 | `agent-profile --show [name]` | Path, model, plugins, skills, hooks, MCP servers. No name: the profile you're in right now |
 | `agent-profile --diff <a> <b>` | The same, side by side |
 | `agent-profile --path [name]` | Print where that profile's config directory is, and nothing else |
@@ -322,6 +323,32 @@ Shared across all profiles (symlinked back to `~/.claude`): `plugins/` (the
 download cache — install once, enable per profile in `settings.json`),
 `projects/`, `history.jsonl`, `.credentials.json` (so you never re-authenticate),
 and the runtime directories.
+
+### Shared skills from `~/.agents/skills`
+
+`~/.agents/skills` is the tool-neutral place to keep one copy of a skill.
+Nothing loads it while it runs, though: Claude Code and Codex only read it to
+*import* from, writing copies into their own skills folder. What makes a skill
+load is a directory inside the config each tool actually reads — for Claude
+Code that is `skills/` in the active profile.
+
+`agent-profile --link-skills [name]` puts a symlink there for every skill in
+`~/.agents/skills` that the profile does not already have. Edit the skill once
+in the shared store, and every profile you linked it into sees the change.
+
+It is opt-in per profile, and never runs on a switch: profiles exist to differ,
+so a skill should not appear in your minimal profile because you installed it
+for another one. Run it again after installing or removing a shared skill — new
+skills get linked, links to deleted ones get cleared, and anything the profile
+owns is left where it is.
+
+Two things it deliberately does not do. A skill the profile has as real content
+is never replaced; you get a `kept` line instead. And because `--create` and
+`--copy` snapshot a profile by value, links become copies in the new profile —
+delete the copy and re-run to follow the shared skill again.
+
+Exporting a profile carries the links, not the skills they point at. On the
+other machine, install the shared skills and run `--link-skills` again.
 
 ## Where the data lives
 

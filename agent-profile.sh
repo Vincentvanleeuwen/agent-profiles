@@ -99,6 +99,7 @@ agent-profile --reset [name]        wipe a profile back to a fresh config (defau
 agent-profile --delete <name>       delete a profile (backed up first)
 agent-profile --rename <a> <b>      rename a profile
 agent-profile --copy <a> <b>        duplicate a profile
+agent-profile --link-skills [name]  link ~/.agents/skills into a profile
 
 agent-profile --show [name]         model, plugins, skills, hooks, mcp servers
 agent-profile --diff <a> <b>        the same, for two profiles
@@ -127,6 +128,7 @@ _cp_main() {
         --delete)           shift; _cp_cmd_delete "$@" ;;
         --rename)           shift; _cp_cmd_rename "$@" ;;
         --copy)             shift; _cp_cmd_copy "$@" ;;
+        --link-skills)      shift; _cp_cmd_link_skills "$@" ;;
         --show)             shift; _cp_cmd_show "$@" ;;
         --diff)             shift; _cp_cmd_diff "$@" ;;
         --path)             shift; _cp_cmd_path "$@" ;;

@@ -170,3 +170,68 @@ _cp_cmd_copy() {
     fi
     printf 'copied %s -> %s\n' "$_s" "$_n"
 }
+
+# Where the agent-agnostic skill store lives: one copy of a skill, shared by
+# every tool that can read it.
+_cp_shared_skills() { printf '%s' "$HOME/.agents/skills"; }
+
+# Link ~/.agents/skills into one profile's own skills/.
+#
+# No agent loads that directory while it runs — Claude Code and Codex only offer
+# to import from it — so a link inside the profile is what actually makes a
+# shared skill load. Opt-in per profile rather than done on every switch, since
+# profiles exist to differ.
+_cp_cmd_link_skills() {
+    _n="${1:-$(_cp_selected)}"
+    if [ -z "$_n" ]; then
+        printf 'claude-profile: no profile selected; --link-skills never touches ~/.claude\n' >&2
+        return 1
+    fi
+    _cp_need "$_n" || return 1
+    _ls_src=$(_cp_shared_skills)
+    if [ ! -d "$_ls_src" ]; then
+        printf 'claude-profile: no shared skills at %s\n' "$_ls_src" >&2
+        return 1
+    fi
+    _ls_dest="$(_cp_dir "$_n")/skills"
+    mkdir -p "$_ls_dest" || return 1
+    [ -n "${ZSH_VERSION:-}" ] && setopt localoptions nonomatch
+    _ls_linked=0
+    _ls_kept=0
+    # A skill uninstalled from the shared store leaves a dangling link behind.
+    # Only links pointing back into that store are removed; anything the profile
+    # owns, or links somewhere else entirely, are left alone.
+    for _ls_l in "$_ls_dest"/*; do
+        [ -L "$_ls_l" ] || continue
+        [ -e "$_ls_l" ] && continue
+        case "$(readlink "$_ls_l")" in
+            "$_ls_src"/*)
+                rm -f "$_ls_l" || return 1
+                printf 'unlinked %s (gone from %s)\n' "${_ls_l##*/}" "$_ls_src"
+                ;;
+        esac
+    done
+    for _ls_s in "$_ls_src"/*; do
+        [ -f "$_ls_s/SKILL.md" ] || continue
+        _ls_b="${_ls_s##*/}"
+        _ls_t="$_ls_dest/$_ls_b"
+        if [ -L "$_ls_t" ]; then
+            [ "$(readlink "$_ls_t")" = "$_ls_s" ] && continue
+            printf 'kept %s (links somewhere else)\n' "$_ls_b"
+            _ls_kept=$((_ls_kept + 1))
+            continue
+        fi
+        # --create and --copy snapshot a profile by value, so a link taken from
+        # another profile arrives here as a copy: delete that copy and re-run to
+        # follow the shared skill again.
+        if [ -e "$_ls_t" ]; then
+            printf 'kept %s (profile has its own)\n' "$_ls_b"
+            _ls_kept=$((_ls_kept + 1))
+            continue
+        fi
+        ln -s "$_ls_s" "$_ls_t" || return 1
+        printf 'linked %s\n' "$_ls_b"
+        _ls_linked=$((_ls_linked + 1))
+    done
+    printf '%s: %s linked, %s kept\n' "$_n" "$_ls_linked" "$_ls_kept"
+}

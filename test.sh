@@ -1911,5 +1911,50 @@ check_with "dispatcher repairs a symlink-stripped npm source" node \
     [ -L "$TMP/npmhome2/.claude-profile/bin/claude-profile" ] &&
     [ -L "$TMP/npmhome2/.local/bin/claude-profile" ] && [ -e "$TMP/npmhome2/.local/bin/claude-profile" ]'
 
+echo "== Task 21: shared agent skills =="
+
+mkdir -p "$FAKEHOME/.agents/skills/shared" "$FAKEHOME/.agents/skills/gone" \
+         "$FAKEHOME/.agents/skills/notaskill"
+printf 'name: shared\n' > "$FAKEHOME/.agents/skills/shared/SKILL.md"
+printf 'name: gone\n'   > "$FAKEHOME/.agents/skills/gone/SKILL.md"
+
+_cp_main --create linked >/dev/null
+L="$TMP/store/profiles/linked/skills"
+mkdir -p "$L/own"
+printf 'name: own\n' > "$L/own/SKILL.md"
+( cd "$L" && ln -s "$TMP/external-skill" elsewhere )
+
+_cp_main --link-skills linked >/dev/null
+check "shared skill is linked in"     '[ -L "$L/shared" ] && [ -f "$L/shared/SKILL.md" ]'
+check "shared skill points at store"  '[ "$(readlink "$L/shared")" = "$FAKEHOME/.agents/skills/shared" ]'
+check "directory without SKILL.md skipped" '[ ! -e "$L/notaskill" ]'
+check "profile keeps its own skill"   '[ -d "$L/own" ] && [ ! -L "$L/own" ]'
+check "foreign link left alone"       '[ "$(readlink "$L/elsewhere")" = "$TMP/external-skill" ]'
+check "show lists a linked skill"     '_cp_main --show linked | grep -q shared'
+
+_cp_main --link-skills linked >/dev/null
+check "relinking is idempotent" '[ -L "$L/shared" ] && [ -f "$L/shared/SKILL.md" ]'
+
+rm -rf "$FAKEHOME/.agents/skills/gone"
+_cp_main --link-skills linked >/dev/null
+check "dangling link is cleared" '[ ! -L "$L/gone" ]'
+check "own skill survives a reconcile" '[ -f "$L/own/SKILL.md" ]'
+
+_cp_main linked >/dev/null
+rm -rf "$L/shared"
+_cp_main --link-skills >/dev/null
+check "no name links the active profile" '[ -L "$L/shared" ]'
+
+_cp_main default >/dev/null
+out=$(_cp_main --link-skills 2>&1)
+eq "refuses with no profile selected" "$?" "1"
+check "refusal names ~/.claude" 'printf "%s" "$out" | grep -q "never touches"'
+
+check "help lists link-skills" '_cp_main --help | grep -q -- "--link-skills"'
+check "README documents link-skills" 'grep -q -- "--link-skills" "$HERE/README.md"'
+
+_CP_YES=1 _cp_main --delete linked >/dev/null
+
+
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
