@@ -1174,6 +1174,23 @@ check "store collision leaves the working install untouched" \
    '[ -f "$IH_STORE_COLLISION/.claude-profile/bin/keep" ] &&
     [ ! -e "$IH_STORE_COLLISION/.agent-profile" ] && [ ! -e "$IH_STORE_COLLISION/.zshrc" ]'
 
+# A machine that has already been renamed can keep ~/.claude-profiles as a
+# symlink to the new store. Following it reads as a legacy store, and the
+# collision check above then refuses to merge the store into itself.
+IH_STORE_SHIM="$TMP/ihome-store-shim"
+mkdir -p "$IH_STORE_SHIM/.agent-profiles/profiles/keepme" "$IH_STORE_SHIM/.local/bin"
+ln -s "$IH_STORE_SHIM/.agent-profiles" "$IH_STORE_SHIM/.claude-profiles"
+(
+    unset CLAUDE_PROFILES_DIR CLAUDE_PROFILE_INSTALL_DIR
+    HOME="$IH_STORE_SHIM" SHELL=/bin/zsh CP_RC="$IH_STORE_SHIM/.zshrc" \
+        CP_ZSHENV="$IH_STORE_SHIM/.zshenv" CP_LINK_DIR="$IH_STORE_SHIM/.local/bin" \
+        sh "$HERE/install.sh" --from-npm >/dev/null 2>&1
+)
+eq "install ignores a legacy store that is the current one" "$?" "0"
+check "the legacy symlink and the store are both left alone" \
+   '[ -L "$IH_STORE_SHIM/.claude-profiles" ] &&
+    [ -d "$IH_STORE_SHIM/.agent-profiles/profiles/keepme" ]'
+
 IH_INSTALL_COLLISION="$TMP/ihome-install-collision"
 mkdir -p "$IH_INSTALL_COLLISION/.claude-profile/bin" \
          "$IH_INSTALL_COLLISION/.claude-profile/lib" \

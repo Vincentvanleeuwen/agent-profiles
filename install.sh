@@ -101,6 +101,15 @@ store_has_profile() {
     return 1
 }
 
+# Two paths that land on the same directory. The rename leaves ~/.claude-profiles
+# behind as a symlink to the new store, so without this every later install reads
+# that shim as a legacy store and refuses to merge the store into itself.
+same_dir() {
+    _sd_a=$(cd "$1" 2>/dev/null && pwd -P) || return 1
+    _sd_b=$(cd "$2" 2>/dev/null && pwd -P) || return 1
+    [ "$_sd_a" = "$_sd_b" ]
+}
+
 preflight_migrations() {
     if [ -z "${CLAUDE_PROFILE_INSTALL_DIR:-}" ] && [ -d "$LEGACY_INSTALL_DIR" ]; then
         [ ! -e "$INSTALL_DIR" ] \
@@ -112,18 +121,20 @@ preflight_migrations() {
         fi
     fi
 
+    _pm_store=${CLAUDE_PROFILES_DIR:-$HOME/.agent-profiles}
     _pm_source=""
-    if [ -z "${CLAUDE_PROFILES_DIR:-}" ] && [ -d "$LEGACY_STORE/profiles" ]; then
+    if [ -z "${CLAUDE_PROFILES_DIR:-}" ] && [ -d "$LEGACY_STORE/profiles" ] &&
+       ! same_dir "$LEGACY_STORE" "$_pm_store"; then
         _pm_source="$LEGACY_STORE"
     fi
-    if [ -z "$no_migrate" ] && [ "$SELF_DIR" != "$INSTALL_DIR" ] && store_has_profile "$SELF_DIR"; then
+    if [ -z "$no_migrate" ] && [ "$SELF_DIR" != "$INSTALL_DIR" ] && store_has_profile "$SELF_DIR" &&
+       ! same_dir "$SELF_DIR" "$_pm_store"; then
         [ -z "$_pm_source" ] \
             || die "both $LEGACY_STORE and $SELF_DIR contain profile stores; refusing to merge them"
         _pm_source="$SELF_DIR"
     fi
     [ -n "$_pm_source" ] || return 0
 
-    _pm_store=${CLAUDE_PROFILES_DIR:-$HOME/.agent-profiles}
     case "$_pm_source$_pm_store" in
         *[\\\&\|]*) die "profile store paths contain \\, & or |; refusing to migrate" ;;
     esac
@@ -402,6 +413,7 @@ migrate_clone_store() {
     [ "$SELF_DIR" = "$INSTALL_DIR" ] && return 0
     [ -d "$SELF_DIR/profiles" ] || return 0
     store_has_profile "$SELF_DIR" || return 0
+    same_dir "$SELF_DIR" "${CLAUDE_PROFILES_DIR:-$HOME/.agent-profiles}" && return 0
     say "found a store in $SELF_DIR, moving it out of the clone"
     "$TARGET" --migrate-store "$SELF_DIR" \
         || die "the code is installed but the store was not migrated. Run
@@ -412,6 +424,7 @@ migrate_legacy_store() {
     [ -n "$no_migrate" ] && return 0
     [ -n "${CLAUDE_PROFILES_DIR:-}" ] && return 0
     [ -d "$LEGACY_STORE/profiles" ] || return 0
+    same_dir "$LEGACY_STORE" "$HOME/.agent-profiles" && return 0
     say "found the legacy store at $LEGACY_STORE, moving it to $HOME/.agent-profiles"
     "$TARGET" --migrate-store "$LEGACY_STORE" \
         || die "the code is installed but the legacy store was not migrated"
