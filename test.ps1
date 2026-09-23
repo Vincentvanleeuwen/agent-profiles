@@ -203,6 +203,47 @@ try {
     Check 'gemini: seeds missing profile settings' $true ([IO.File]::ReadAllText($financeGemini).Contains('default'))
     & $mod { Set-CpDefaultProfile }
 
+    # --- Codex skills ---------------------------------------------------------
+    #
+    # One directory for the whole machine, so it switches with the profile the
+    # same way config.toml does: copied in and out, never linked.
+
+    $codexSkills = Join-Path $codexDir 'skills'
+    $defaultSkills = Join-Path $store 'codex-default.skills'
+    $workSkills = Join-Path $store 'profiles\work\codex.skills'
+    $financeSkills = Join-Path $store 'profiles\finance\codex.skills'
+    Remove-Item -LiteralPath $defaultSkills -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path (Join-Path $codexSkills 'writer') | Out-Null
+    Utf8NoBom (Join-Path $codexSkills 'writer\SKILL.md') 'name: writer'
+
+    & $mod { Set-CpActiveProfile 'work' }
+    Check 'codex skills: default seeded from the live tree' $true `
+        (Test-Path -LiteralPath (Join-Path $defaultSkills 'writer\SKILL.md'))
+    Check 'codex skills: profile seeded from the default' $true `
+        (Test-Path -LiteralPath (Join-Path $workSkills 'writer\SKILL.md'))
+    Check 'codex skills: live tree is a real directory' $false `
+        ((Get-Item -LiteralPath $codexSkills).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint))
+
+    New-Item -ItemType Directory -Force -Path (Join-Path $codexSkills 'onlywork') | Out-Null
+    Utf8NoBom (Join-Path $codexSkills 'onlywork\SKILL.md') 'name: onlywork'
+    & $mod { Set-CpActiveProfile 'finance' }
+    Check 'codex skills: snapshots the outgoing profile' $true `
+        (Test-Path -LiteralPath (Join-Path $workSkills 'onlywork\SKILL.md'))
+    Check 'codex skills: the next profile does not see it' $false `
+        (Test-Path -LiteralPath (Join-Path $codexSkills 'onlywork'))
+    Check 'codex skills: seeds a missing profile tree' $true `
+        (Test-Path -LiteralPath (Join-Path $financeSkills 'writer\SKILL.md'))
+
+    & $mod { Set-CpActiveProfile 'work' }
+    Check 'codex skills: switching back restores the tree' $true `
+        (Test-Path -LiteralPath (Join-Path $codexSkills 'onlywork\SKILL.md'))
+
+    & $mod { Set-CpDefaultProfile }
+    Check 'codex skills: default restores the stored tree' $false `
+        (Test-Path -LiteralPath (Join-Path $codexSkills 'onlywork'))
+    Check 'codex skills: default keeps what the default holds' $true `
+        (Test-Path -LiteralPath (Join-Path $codexSkills 'writer\SKILL.md'))
+
     # --- resolution precedence -----------------------------------------------
 
     Set-Location $work

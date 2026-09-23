@@ -76,7 +76,10 @@ _cp_cmd_reset() {
         return 1
     fi
     rmdir "$_empty"
-    if ! _cp_codex_prepare_default || ! _cp_file_copy "$(_cp_codex_default)" "$(_cp_codex_profile "$_n")"; then
+    # The backup above moved the whole profile directory away, so nothing
+    # Codex-owned is left: _cp_codex_ensure rebuilds config and skills from the
+    # stored defaults, which is exactly what a reset means here.
+    if ! _cp_codex_ensure "$_n"; then
         printf 'claude-profile: failed to reset Codex config for "%s"; previous contents at %s\n' "$_n" "$_bk" >&2
         return 1
     fi

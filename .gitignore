@@ -12,3 +12,5 @@ gemini-default.settings.json
 codex-default.config.toml.tmp.*
 gemini-default.settings.json.tmp.*
 graphify-out/
+codex-default.skills/
+codex-default.skills.tmp.*

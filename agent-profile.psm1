@@ -185,6 +185,19 @@ function Get-CpCodexProfile {
     return (Join-Path (Get-CpProfileDir $Name) 'codex.config.toml')
 }
 
+function Get-CpCodexSkills {
+    return (Join-Path (Join-Path (Get-CpHome) '.codex') 'skills')
+}
+
+function Get-CpCodexSkillsDefault {
+    return (Join-Path (Get-CpStore) 'codex-default.skills')
+}
+
+function Get-CpCodexSkillsProfile {
+    param([string]$Name)
+    return (Join-Path (Get-CpProfileDir $Name) 'codex.skills')
+}
+
 function Get-CpGeminiConfig {
     return (Join-Path (Join-Path (Get-CpHome) '.gemini') 'settings.json')
 }
@@ -217,6 +230,34 @@ function Copy-CpFileAtomic {
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
     }
+}
+
+# Copy-CpFileAtomic for a directory. There is no atomic rename over a populated
+# directory on Windows, so the copy is built beside the destination first: a
+# failed copy leaves the old tree untouched, and only the swap is exposed.
+function Copy-CpTreeAtomic {
+    param([string]$Source, [string]$Destination)
+    $parent = Split-Path -Parent $Destination
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    }
+    $tmp = "$Destination.tmp.$PID"
+    Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    try {
+        Copy-Item -LiteralPath $Source -Destination $tmp -Recurse -Force
+        Remove-Item -LiteralPath $Destination -Recurse -Force -ErrorAction SilentlyContinue
+        Move-Item -LiteralPath $tmp -Destination $Destination
+    } finally {
+        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# A profile made before Codex skills were profile-owned has no tree to copy,
+# which is not an error: it simply keeps whatever is live.
+function Copy-CpSkillTree {
+    param([string]$Source, [string]$Destination)
+    if (-not (Test-Path -LiteralPath $Source -PathType Container)) { return }
+    Copy-CpTreeAtomic $Source $Destination
 }
 
 function Write-CpTextAtomic {
@@ -263,6 +304,32 @@ function Save-CpCodexCurrent {
     Copy-CpFileAtomic $live $destination
 }
 
+# Codex reads its skills from one directory for the whole machine, so it
+# switches with the profile like config.toml does. No link here for the reason
+# given at the top of this file: the live tree is copied in and out instead.
+function Initialize-CpCodexSkillsDefault {
+    $default = Get-CpCodexSkillsDefault
+    if (Test-Path -LiteralPath $default -PathType Container) { return }
+    $live = Get-CpCodexSkills
+    if (Test-Path -LiteralPath $live -PathType Container) {
+        Copy-CpTreeAtomic $live $default
+    } else {
+        New-Item -ItemType Directory -Force -Path $default | Out-Null
+    }
+}
+
+function Save-CpCodexSkillsCurrent {
+    $live = Get-CpCodexSkills
+    if (-not (Test-Path -LiteralPath $live -PathType Container)) { return }
+    $active = Read-CpName (Join-Path (Get-CpStore) 'active')
+    $destination = if ($active -and (Test-Path -LiteralPath (Get-CpProfileDir $active) -PathType Container)) {
+        Get-CpCodexSkillsProfile $active
+    } else {
+        Get-CpCodexSkillsDefault
+    }
+    Copy-CpTreeAtomic $live $destination
+}
+
 function Initialize-CpGeminiDefault {
     $default = Get-CpGeminiDefault
     if (Test-Path -LiteralPath $default -PathType Leaf) { return }
@@ -291,9 +358,11 @@ function Restore-CpClientSelection {
     if ($Name -and (Test-Path -LiteralPath (Get-CpProfileDir $Name) -PathType Container)) {
         Copy-CpFileAtomic (Get-CpCodexProfile $Name) (Get-CpCodexConfig)
         Copy-CpFileAtomic (Get-CpGeminiProfile $Name) (Get-CpGeminiConfig)
+        Copy-CpSkillTree (Get-CpCodexSkillsProfile $Name) (Get-CpCodexSkills)
     } else {
         Copy-CpFileAtomic (Get-CpCodexDefault) (Get-CpCodexConfig)
         Copy-CpFileAtomic (Get-CpGeminiDefault) (Get-CpGeminiConfig)
+        Copy-CpSkillTree (Get-CpCodexSkillsDefault) (Get-CpCodexSkills)
     }
 }
 
@@ -305,8 +374,10 @@ function Set-CpActiveProfile {
     }
     Initialize-CpCodexDefault
     Initialize-CpGeminiDefault
+    Initialize-CpCodexSkillsDefault
     Save-CpCodexCurrent
     Save-CpGeminiCurrent
+    Save-CpCodexSkillsCurrent
     $target = Get-CpCodexProfile $Name
     if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
         Copy-CpFileAtomic (Get-CpCodexDefault) $target
@@ -315,10 +386,15 @@ function Set-CpActiveProfile {
     if (-not (Test-Path -LiteralPath $geminiTarget -PathType Leaf)) {
         Copy-CpFileAtomic (Get-CpGeminiDefault) $geminiTarget
     }
+    $skillsTarget = Get-CpCodexSkillsProfile $Name
+    if (-not (Test-Path -LiteralPath $skillsTarget -PathType Container)) {
+        Copy-CpTreeAtomic (Get-CpCodexSkillsDefault) $skillsTarget
+    }
     $oldActive = Read-CpName (Join-Path (Get-CpStore) 'active')
     try {
         Copy-CpFileAtomic $target (Get-CpCodexConfig)
         Copy-CpFileAtomic $geminiTarget (Get-CpGeminiConfig)
+        Copy-CpTreeAtomic $skillsTarget (Get-CpCodexSkills)
         Write-CpTextAtomic (Join-Path (Get-CpStore) 'active') "$Name`n"
     } catch {
         try { Restore-CpClientSelection $oldActive } catch { }
@@ -330,8 +406,10 @@ function Set-CpActiveProfile {
 function Set-CpDefaultProfile {
     Initialize-CpCodexDefault
     Initialize-CpGeminiDefault
+    Initialize-CpCodexSkillsDefault
     Save-CpCodexCurrent
     Save-CpGeminiCurrent
+    Save-CpCodexSkillsCurrent
     $oldActive = Read-CpName (Join-Path (Get-CpStore) 'active')
     try {
         Restore-CpClientSelection ''

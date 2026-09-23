@@ -350,6 +350,29 @@ delete the copy and re-run to follow the shared skill again.
 Exporting a profile carries the links, not the skills they point at. On the
 other machine, install the shared skills and run `--link-skills` again.
 
+The links above are Claude Code's. Codex has its own store, described next.
+
+### Codex skills
+
+Codex reads its skills from `~/.codex/skills`. That is one directory for the
+whole machine, so it gets the same treatment `config.toml` already gets: the
+profile owns a `codex.skills/` directory, and `~/.codex/skills` becomes a link
+to whichever profile is active. `agent-profile default` points it back at
+`codex-default.skills` in the store.
+
+The first switch hands your existing `~/.codex/skills` over as that default, by
+moving it. Nothing is deleted. If a real directory turns up there later — Codex
+recreating it, or a reinstall — the next switch moves it into `.backups/` in the
+store and says so, rather than removing it to make room for the link.
+
+`--create` and `--update` snapshot the live directory into the profile,
+`--copy` and `--export` carry it, and `--reset` rebuilds it from the stored
+default. All by value: a profile is a snapshot, not a view of another profile.
+
+To share one skill across profiles here, keep it in `~/.agents/skills` and link
+it into each profile's `codex.skills/` yourself. `--link-skills` does not touch
+Codex, because a skill written for one tool does not always work in the other.
+
 ## Where the data lives
 
 Profiles and the preserved default Codex and Gemini settings live in

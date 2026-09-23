@@ -8,6 +8,10 @@ _cp_codex_config() { printf '%s' "$HOME/.codex/config.toml"; }
 _cp_codex_default() { printf '%s' "$(_cp_store)/codex-default.config.toml"; }
 _cp_codex_profile() { printf '%s' "$(_cp_dir "$1")/codex.config.toml"; }
 
+_cp_codex_skills() { printf '%s' "$HOME/.codex/skills"; }
+_cp_codex_skills_default() { printf '%s' "$(_cp_store)/codex-default.skills"; }
+_cp_codex_skills_profile() { printf '%s' "$(_cp_dir "$1")/codex.skills"; }
+
 _cp_file_copy() {
     _cc_src="$1"
     _cc_dest="$2"
@@ -15,6 +19,19 @@ _cp_file_copy() {
     rm -f "$_cc_tmp"
     cp -L "$_cc_src" "$_cc_tmp" || { rm -f "$_cc_tmp"; return 1; }
     mv -f "$_cc_tmp" "$_cc_dest" || { rm -f "$_cc_tmp"; return 1; }
+}
+
+# A directory replaced by value: built beside the destination, then swapped in,
+# so a failed copy leaves the old tree where it was. -L for the same reason
+# _cp_build uses it — a profile is a snapshot, not a view of another tree.
+_cp_tree_copy() {
+    _tc_src="$1"
+    _tc_dest="$2"
+    _tc_tmp="$_tc_dest.tmp.$$"
+    rm -rf "${_tc_tmp:?}" || return 1
+    cp -RL "$_tc_src" "$_tc_tmp" || { rm -rf "${_tc_tmp:?}"; return 1; }
+    rm -rf "${_tc_dest:?}" || { rm -rf "${_tc_tmp:?}"; return 1; }
+    mv "$_tc_tmp" "$_tc_dest" || { rm -rf "${_tc_tmp:?}"; return 1; }
 }
 
 _cp_codex_prepare_default() {
@@ -30,20 +47,96 @@ _cp_codex_prepare_default() {
     fi
 }
 
+# Codex reads its skills from ~/.codex/skills, one directory for the whole
+# machine. Swapping the directory for a link into the profile is what makes them
+# follow the profile, the same move config.toml already gets.
+#
+# A real directory there is content, not a switch artefact, so it is moved into
+# the store rather than deleted: the first one becomes the default that
+# `agent-profile default` links back to, a later one (Codex recreating it, a
+# reinstall) is parked in .backups. Only a switch may do this — snapshotting a
+# profile leaves the live directory exactly where it is.
+_cp_codex_skills_park() {
+    _csp_live=$(_cp_codex_skills)
+    { [ -d "$_csp_live" ] && [ ! -L "$_csp_live" ]; } || return 0
+    mkdir -p "$(_cp_store)" || return 1
+    _csp_dest=$(_cp_codex_skills_default)
+    if [ -e "$_csp_dest" ]; then
+        mkdir -p "$(_cp_store)/.backups" || return 1
+        _csp_stamp=$(date +%Y%m%d-%H%M%S)
+        _csp_dest="$(_cp_store)/.backups/codex-skills-$_csp_stamp"
+        _csp_i=1
+        while [ -e "$_csp_dest" ]; do
+            _csp_dest="$(_cp_store)/.backups/codex-skills-$_csp_stamp-$_csp_i"
+            _csp_i=$((_csp_i + 1))
+        done
+        printf 'claude-profile: moved %s to %s\n' "$_csp_live" "$_csp_dest" >&2
+    fi
+    mv "$_csp_live" "$_csp_dest"
+}
+
+_cp_codex_skills_prepare_default() {
+    _csd_default=$(_cp_codex_skills_default)
+    [ -d "$_csd_default" ] && return 0
+    mkdir -p "$(_cp_store)" || return 1
+    if [ -d "$(_cp_codex_skills)" ]; then
+        _cp_tree_copy "$(_cp_codex_skills)" "$_csd_default"
+    else
+        mkdir -p "$_csd_default"
+    fi
+}
+
+_cp_codex_skills_snapshot() {
+    _css_dest=$(_cp_codex_skills_profile "$1")
+    if [ -d "$(_cp_codex_skills)" ]; then
+        _cp_tree_copy "$(_cp_codex_skills)" "$_css_dest"
+    else
+        _cp_codex_skills_prepare_default || return 1
+        _cp_tree_copy "$(_cp_codex_skills_default)" "$_css_dest"
+    fi
+}
+
+_cp_codex_skills_ensure() {
+    _cse_profile=$(_cp_codex_skills_profile "$1")
+    [ -d "$_cse_profile" ] && return 0
+    _cp_codex_skills_prepare_default || return 1
+    _cp_tree_copy "$(_cp_codex_skills_default)" "$_cse_profile"
+}
+
+# Removed and recreated rather than swapped through a temporary name like
+# _cp_codex_link does: mv onto a symlink that points at a directory can put the
+# new link inside that directory instead of replacing it.
+_cp_codex_skills_link() {
+    _csl_target="$1"
+    _csl_live=$(_cp_codex_skills)
+    mkdir -p "$HOME/.codex" || return 1
+    if [ -d "$_csl_live" ] && [ ! -L "$_csl_live" ]; then
+        printf 'claude-profile: %s is a real directory; not replacing it\n' "$_csl_live" >&2
+        return 1
+    fi
+    rm -f "$_csl_live" || return 1
+    ln -s "$_csl_target" "$_csl_live"
+}
+
 _cp_codex_snapshot() {
     _cs_dest=$(_cp_codex_profile "$1")
     if [ -f "$(_cp_codex_config)" ]; then
-        _cp_file_copy "$(_cp_codex_config)" "$_cs_dest"
+        _cp_file_copy "$(_cp_codex_config)" "$_cs_dest" || return 1
     else
-        _cp_codex_prepare_default && _cp_file_copy "$(_cp_codex_default)" "$_cs_dest"
+        _cp_codex_prepare_default || return 1
+        _cp_file_copy "$(_cp_codex_default)" "$_cs_dest" || return 1
     fi
+    _cp_codex_skills_snapshot "$1"
 }
 
 _cp_codex_ensure() {
     _ce_name="$1"
     _ce_profile=$(_cp_codex_profile "$_ce_name")
-    [ -e "$_ce_profile" ] && return 0
-    _cp_codex_prepare_default && _cp_file_copy "$(_cp_codex_default)" "$_ce_profile"
+    if [ ! -e "$_ce_profile" ]; then
+        _cp_codex_prepare_default || return 1
+        _cp_file_copy "$(_cp_codex_default)" "$_ce_profile" || return 1
+    fi
+    _cp_codex_skills_ensure "$_ce_name"
 }
 
 _cp_codex_link() {
@@ -56,15 +149,23 @@ _cp_codex_link() {
     mv -f "$_cl_tmp" "$_cl_config" || { rm -f "$_cl_tmp"; return 1; }
 }
 
+# Park before ensure, so the very first switch hands the live directory over as
+# the default instead of copying it and backing the original up.
 _cp_codex_activate() {
     _ca_name="$1"
     _cp_codex_prepare_default || return 1
+    _cp_codex_skills_park || return 1
     _cp_codex_ensure "$_ca_name" || return 1
-    _cp_codex_link "$(_cp_codex_profile "$_ca_name")"
+    _cp_codex_link "$(_cp_codex_profile "$_ca_name")" || return 1
+    _cp_codex_skills_link "$(_cp_codex_skills_profile "$_ca_name")"
 }
 
 _cp_codex_activate_default() {
-    _cp_codex_prepare_default && _cp_codex_link "$(_cp_codex_default)"
+    _cp_codex_prepare_default || return 1
+    _cp_codex_skills_park || return 1
+    _cp_codex_skills_prepare_default || return 1
+    _cp_codex_link "$(_cp_codex_default)" || return 1
+    _cp_codex_skills_link "$(_cp_codex_skills_default)"
 }
 
 _cp_codex_sync_active() {

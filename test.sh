@@ -1955,6 +1955,72 @@ check "README documents link-skills" 'grep -q -- "--link-skills" "$HERE/README.m
 
 _CP_YES=1 _cp_main --delete linked >/dev/null
 
+echo "== Task 22: Codex skills follow the profile =="
+
+# Start from a machine that has never switched: a real ~/.codex/skills and no
+# stored default, which is the case the handover has to get right.
+rm -rf "$TMP/store/codex-default.skills" "$FAKEHOME/.codex/skills"
+mkdir -p "$FAKEHOME/.codex/skills/writer"
+printf 'name: writer\n' > "$FAKEHOME/.codex/skills/writer/SKILL.md"
+
+_cp_main --create cxa >/dev/null
+_cp_main --create cxb >/dev/null
+check "create snapshots codex skills" '[ -f "$TMP/store/profiles/cxa/codex.skills/writer/SKILL.md" ]'
+check "create leaves the live directory alone" \
+      '[ -d "$FAKEHOME/.codex/skills" ] && [ ! -L "$FAKEHOME/.codex/skills" ]'
+
+_cp_main cxa >/dev/null
+eq "switch links codex skills at the profile" \
+   "$(readlink "$FAKEHOME/.codex/skills")" "$TMP/store/profiles/cxa/codex.skills"
+check "first switch hands the live tree to the default" \
+      '[ -f "$TMP/store/codex-default.skills/writer/SKILL.md" ]'
+check "nothing was backed up on the first switch" \
+      '[ ! -d "$TMP/store/.backups" ] || ! ls "$TMP/store/.backups" | grep -q codex-skills'
+
+mkdir -p "$FAKEHOME/.codex/skills/onlya"
+printf 'name: onlya\n' > "$FAKEHOME/.codex/skills/onlya/SKILL.md"
+check "writing through the link lands in the profile" \
+      '[ -f "$TMP/store/profiles/cxa/codex.skills/onlya/SKILL.md" ]'
+
+_cp_main cxb >/dev/null
+check "the other profile does not see it" '[ ! -e "$FAKEHOME/.codex/skills/onlya" ]'
+check "the other profile has the snapshot"  '[ -f "$FAKEHOME/.codex/skills/writer/SKILL.md" ]'
+_cp_main cxa >/dev/null
+check "switching back restores the skill" '[ -f "$FAKEHOME/.codex/skills/onlya/SKILL.md" ]'
+
+_cp_main default >/dev/null
+eq "default links codex skills at the store default" \
+   "$(readlink "$FAKEHOME/.codex/skills")" "$TMP/store/codex-default.skills"
+
+_CP_YES=1 _cp_main --reset cxb >/dev/null
+check "reset rebuilds codex skills from the default" \
+      '[ -f "$TMP/store/profiles/cxb/codex.skills/writer/SKILL.md" ]'
+
+_cp_main --copy cxa cxc >/dev/null
+check "copy carries codex skills" '[ -f "$TMP/store/profiles/cxc/codex.skills/onlya/SKILL.md" ]'
+check "copy is by value, not a link" '[ ! -L "$TMP/store/profiles/cxc/codex.skills" ]'
+
+_cp_main --export cxa "$TMP/cxa.tar.gz" >/dev/null 2>&1
+check "export carries codex skills" 'tar tzf "$TMP/cxa.tar.gz" | grep -q codex.skills'
+
+# A real directory appearing after the store took over is content someone will
+# want back: it may never be deleted to make room for the link.
+rm -f "$FAKEHOME/.codex/skills"
+mkdir -p "$FAKEHOME/.codex/skills/stray"
+printf 'name: stray\n' > "$FAKEHOME/.codex/skills/stray/SKILL.md"
+_cp_main cxa >/dev/null 2>&1
+check "a stray directory is parked, not deleted" \
+      'find "$TMP/store/.backups" -path "*codex-skills*/stray/SKILL.md" | grep -q .'
+check "the switch still linked"  '[ -L "$FAKEHOME/.codex/skills" ]'
+check "the default was not overwritten" \
+      '[ ! -e "$TMP/store/codex-default.skills/stray" ]'
+
+_cp_main default >/dev/null
+_CP_YES=1 _cp_main --delete cxa >/dev/null
+_CP_YES=1 _cp_main --delete cxb >/dev/null
+_CP_YES=1 _cp_main --delete cxc >/dev/null
+
+check "README documents Codex skills" 'grep -q "codex\.skills" "$HERE/README.md"'
 
 echo
 if [ "$fails" -eq 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
