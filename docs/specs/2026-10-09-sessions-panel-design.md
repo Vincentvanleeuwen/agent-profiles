@@ -1,6 +1,6 @@
 # Sessions side panel — design
 
-Date: 2026-10-09. Status: approved in brainstorming, waiting for spec review.
+Date: 2026-10-09. Status: implemented (updated after the end-to-end run).
 
 ## Goal
 
@@ -51,7 +51,7 @@ Background start:
 3. Otherwise run `claude attach <id>`.
 4. The existing switch loop follows: while the switch file holds an id, `claude attach <that id>`. Ids with characters outside `A-Za-z0-9._-` are refused, as today.
 
-The same change goes into `agent-profile.psm1`. `pwsh` is not installed on the development machine, so that change carries a comment saying it is untested.
+`agent-profile.psm1` (Windows) keeps foreground starts and has no switch loop: the mod finds the terminal to switch with `ps`, which Windows lacks. A comment in `Start-CpClaude` says so.
 
 ## 2. Button and panel
 
@@ -76,28 +76,28 @@ agent-profiles · 1
 - Groups: the current session's repository first, then the others alphabetically. Within a group: needs you, working, idle.
 - Clicking a row opens that session. The current session shows `▸ … (here)`, cannot be clicked and has no stop button.
 - `■` stops after a confirm: the first click turns the row's button into `stop? ■`; a second click within 5 seconds stops the session; otherwise the row returns to normal. Interactive sessions have no stop button.
-- `↻` refreshes the list. `✕` closes the pane.
+- `↻` refreshes the list. `✕` closes the pane; docked, the frame draws its own close mark, so the panel draws none.
 - Inline (above the prompt), the pane asks for as many rows as the list needs.
 
-Staying open across switches: opening the pane writes `$CLAUDE_CONFIG_DIR/hud/panel-open`. On `session.start` the mod reopens the pane when that file exists. `✕`, or Escape closing the pane (`ui.close` with origin `person`), deletes the file. Below 110 columns a reopened pane stays hidden until the person presses the button (a Claude Code rule).
+Staying open across switches: opening the pane writes `$CLAUDE_CONFIG_DIR/hud/panel-open`. Every session checks that file at `session.start` and every 2 seconds after (attaching a terminal raises no event), opening or closing its pane to match. The button treats an open pane that waits undrawn as closed, so a press shows it. `✕`, or Escape closing the pane (`ui.close` with origin `person`), deletes the file. Below 110 columns a reopened pane stays hidden until the person presses the button (a Claude Code rule).
 
 ## 3. Data
 
-Session list: `claude agents --json`. Status mapping from `status`: `busy` → working, `waiting` → needs you, `idle` → idle; `state` is not used. During implementation, a test session with a pending permission prompt confirms which value "needs you" produces. The tests record the result.
+Session list: `claude agents --json`. Status mapping from `status`: `busy` → working, `waiting` → needs you, `idle` → idle; `state` is not used. A session with a pending permission prompt reports `status: waiting` (checked 2026-10-09).
 
-Activity file: each session's own hud mod writes `$CLAUDE_CONFIG_DIR/hud/activity/<sessionId>.json` at the start and end of each main-loop turn (no `agentId`):
+Activity file: each session's own hud mod writes `$CLAUDE_CONFIG_DIR/hud/activity/<sessionId>.json` at each `prompt.submit` and at the end of each main-loop turn (`turn.complete` with no `agentId`; `turn.start` carries no `agentId`, so it is not used). Every prompt resets `promptAt`; only a prompt the person sent (origin `composer` or `bridge`) replaces `lastPrompt`, so task notifications and peer messages do not show as the last prompt:
 
 ```json
 { "sessionId": "…", "promptAt": 0, "finishedAt": 0, "lastPrompt": "first 80 characters", "branch": "main", "repoRoot": "/path/to/repo" }
 ```
 
-The activity file is joined to the list by `sessionId`. The implementation verifies that `$.session.id()` matches `sessionId` from `claude agents --json`, including for a resumed session whose job id differs.
+The activity file is joined to the list by `sessionId`. `$.session.id()` matches `sessionId` from `claude agents --json`, also for a session resumed through the launcher (checked 2026-10-09).
 
 Duration: working → now minus `promptAt`; idle → now minus `finishedAt`; no activity file → idle since `startedAt`. Format: `now` (under a minute), `4m`, `2h`, `3d`.
 
 Repository: `git rev-parse --path-format=absolute --git-common-dir`; the repository name is the folder that holds the common `.git`, so worktrees group under their main repository. The session's activity file supplies it. Without one, the panel runs the command on the session's `cwd` and caches the result per folder. Outside git, the group is the folder name.
 
-Refresh: the list and durations refresh every 15 seconds while the pane is open, and after each main-loop turn. The spinner only runs while the pane is open.
+Refresh: the list and durations refresh every 15 seconds while a terminal draws the pane, and after each main-loop turn. The spinner and the refresh start when the pane is drawn and stop once it has not been drawn for 5 seconds, so a background session nobody watches does not poll.
 
 Cleanup: on refresh, delete activity files not modified for 7 days.
 
@@ -111,8 +111,9 @@ Opening session T from the current session S:
    - `ps -axo pid=,tty=,command=`: a `claude` program on a real tty (not `??`), excluding the background service's helpers (`daemon`, `bg-spare`, `bg-pty-host`).
    - Same profile: `CLAUDE_CONFIG_DIR` in the process environment (`ps -wwE`) equals this session's.
    - Arguments are `attach <S job id>`, `agents`, or `attach <x>` where x is not another listed session's exact job id (an attach by name may be S).
-   - Exactly one candidate → read its `CLAUDE_PROFILE_SWITCH_FILE`, write T's job id, end the process with SIGTERM. No switch file → notice that this terminal was not started by the launcher.
-   - Zero, or two or more candidates → notice: `Press ← and pick "<T>"`. Never guess.
+   - Narrow down, in order: exactly one `attach <S job id>` wins (a terminal renames itself on entering agent view, so this one shows S for certain). Otherwise, with two or more left and every size readable (`stty -f /dev/<tty> size`), keep those whose rows equal the rows S last drew at and whose columns are at least its width (a docked pane narrows what S sees). The real terminal always passes, so a single survivor is it.
+   - Exactly one left → read its `CLAUDE_PROFILE_SWITCH_FILE`, write T's job id, end the process with SIGTERM. No switch file → notice that this terminal was not started by the launcher.
+   - Zero, or two or more left → notice: `Press ← and pick "<T>"`. Never guess.
 
 The `panel-open` file stays, so T reopens the pane.
 
