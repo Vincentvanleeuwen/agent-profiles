@@ -404,6 +404,54 @@ out=$(_CP_RUNNER='_cp_test_runner' _cp_main ghost -- --version 2>&1)
 check "one-shot on unknown profile errors" 'printf "%s" "$out" | grep -q "no such profile"'
 unset _CP_RUNNER
 
+echo "== Session switch =="
+
+# Stands in for a session that asks to switch once, then for the attached one.
+_cp_switch_runner() {
+    printf '%s\n' "$*" >> "$TMP/switch-calls"
+    [ "$1" = attach ] || printf '%s' "$_switch_to" > "$CLAUDE_PROFILE_SWITCH_FILE"
+}
+
+rm -f "$TMP/switch-calls"
+_switch_to='session-b'
+_CP_RUNNER='_cp_switch_runner' _cp_launch "$(_cp_dir dev)" --version >/dev/null 2>&1
+eq "a switch request opens the session it names" "$(cat "$TMP/switch-calls")" "$(printf -- '--version\nattach session-b')"
+check "the switch request is used up" '[ ! -e "${TMPDIR:-/tmp}/agent-profile-switch.$$" ]'
+
+rm -f "$TMP/switch-calls"
+_switch_to='session-b; rm -rf ~'
+_CP_RUNNER='_cp_switch_runner' _cp_launch "$(_cp_dir dev)" --version >/dev/null 2>&1
+eq "a switch to a malformed id is ignored" "$(cat "$TMP/switch-calls")" "--version"
+unset _switch_to
+
+echo "== Background start =="
+
+# Stands in for claude: --bg prints the id the way 2.1.295 does, or fails like an untrusted folder.
+_cp_bg_runner() {
+    printf '%s\n' "$*" >> "$TMP/bg-calls"
+    if [ "$1" = --bg ]; then
+        [ -z "$_bg_fails" ] || { echo 'Workspace not trusted.'; return 1; }
+        printf 'backgrounded · job-1 · probe (idle — send a prompt to start)\n  claude agents  list sessions\n'
+    fi
+}
+
+bg_calls() {
+    rm -f "$TMP/bg-calls"
+    _CP_RUNNER='_cp_bg_runner' _cp_launch "$(_cp_dir dev)" "$@" >/dev/null 2>&1
+    cat "$TMP/bg-calls"
+}
+
+eq "no arguments start in the background" "$(bg_calls)" "$(printf -- '--bg\nattach job-1')"
+eq "flags start in the background" "$(bg_calls --model opus)" "$(printf -- '--bg --model opus\nattach job-1')"
+eq "a prompt starts in the background" "$(bg_calls 'fix the test')" "$(printf -- '--bg fix the test\nattach job-1')"
+eq "a subcommand runs unchanged" "$(bg_calls agents)" "agents"
+eq "print mode runs unchanged" "$(bg_calls -p hi)" "-p hi"
+eq "a one-word prompt runs unchanged" "$(bg_calls fix)" "fix"
+eq "an explicit --bg runs unchanged" "$(bg_calls --bg 'do it')" "--bg do it"
+_bg_fails=1
+eq "a refused background start runs in the foreground" "$(bg_calls --model opus)" "$(printf -- '--bg --model opus\n--model opus')"
+unset _bg_fails
+
 echo "== Task 5: update =="
 
 _cp_main default >/dev/null

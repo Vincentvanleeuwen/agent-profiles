@@ -504,6 +504,8 @@ function Sync-CpPrompts {
 function Start-CpClaude {
     param([string]$Dir, [string[]]$ClaudeArgs)
 
+    # No background start or session switch loop here: the hud mod finds the terminal to switch with `ps`, which Windows lacks.
+
     # -CommandType Application is what stops this resolving to the wrapper
     # function and recursing. Not pinned to .exe: a future npm-style install
     # could put a claude.cmd on PATH instead.

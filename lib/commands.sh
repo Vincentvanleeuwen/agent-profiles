@@ -370,13 +370,54 @@ _cp_run_claude() {
     fi
 }
 
+# Plain starts become background sessions shown with `claude attach`, so the
+# hud panel can open any session in any terminal. A subcommand, a one-word
+# prompt (it reads like a subcommand) and print/help/version run unchanged.
+_cp_starts_in_background() {
+    [ $# -eq 0 ] && return 0
+    case "$1" in
+        -*|*' '*) ;;
+        *) return 1 ;;
+    esac
+    for _sb_arg in "$@"; do
+        case "$_sb_arg" in
+            -p|--print|-h|--help|-v|--version|--bg|--background) return 1 ;;
+        esac
+    done
+    return 0
+}
+
 # Single choke point for starting a session: pull shared prompt state in,
 # run, push back whatever this session accepted.
 _cp_launch() {
     _l_dir="$1"; shift
+    _l_switch="${TMPDIR:-/tmp}/agent-profile-switch.$$"
+    rm -f "$_l_switch"
     _cp_sync_prompts "$_l_dir"
-    CLAUDE_CONFIG_DIR="$_l_dir" _cp_run_claude "$@"
-    _l_rc=$?
+    _l_rc=0
+    _l_job=
+    if _cp_starts_in_background "$@"; then
+        _l_job=$(CLAUDE_CONFIG_DIR="$_l_dir" _cp_run_claude --bg "$@" 2>&1 |
+            sed -n 's/^backgrounded · \([A-Za-z0-9._-]*\) .*/\1/p' | head -n 1)
+    fi
+    if [ -n "$_l_job" ]; then
+        printf '%s' "$_l_job" > "$_l_switch"
+    else
+        # Refused (an untrusted folder): the foreground run shows the trust prompt or the real error.
+        CLAUDE_CONFIG_DIR="$_l_dir" CLAUDE_PROFILE_SWITCH_FILE="$_l_switch" _cp_run_claude "$@"
+        _l_rc=$?
+    fi
+    # A session switcher (the hud mod) writes the session to open next here,
+    # then ends the display or its own foreground run.
+    while [ -s "$_l_switch" ]; do
+        _l_target=$(cat "$_l_switch")
+        rm -f "$_l_switch"
+        case "$_l_target" in
+            *[!A-Za-z0-9._-]*) printf 'claude-profile: ignored a session switch to "%s"\n' "$_l_target" >&2; break ;;
+        esac
+        CLAUDE_CONFIG_DIR="$_l_dir" CLAUDE_PROFILE_SWITCH_FILE="$_l_switch" _cp_run_claude attach "$_l_target"
+        _l_rc=$?
+    done
     _cp_sync_prompts "$_l_dir"
     return $_l_rc
 }
